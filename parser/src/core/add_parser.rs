@@ -1,4 +1,4 @@
-use crate::core::parser::{Parser, ParsersImpl};
+use crate::core::parser::{Parser};
 use crate::core::parser_methods::ParserMethods;
 
 use std::ops::Add;
@@ -10,7 +10,7 @@ where
 {
   type Output = Parser<'a, (A, B)>;
 
-  fn add(self, rhs: Parser<'a, B>) -> Self::Output {
-    ParsersImpl::and(self, rhs)
+  fn add(self, parser2: Parser<'a, B>) -> Self::Output {
+    ParserMethods::and(self, parser2)
   }
 }

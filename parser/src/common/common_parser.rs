@@ -1,5 +1,6 @@
 use crate::core::parse_result::*;
 use crate::core::parser::*;
+use crate::core::parser_methods::ParserMethods;
 
 pub fn char<'a>(c: char) -> Parser<'a, char> {
     Parser::new(move |input: &str, location: usize| {
@@ -38,4 +39,19 @@ fn test_char_parser() {
         },
         _ => assert!(false)
     }
+
+    let a = char('a');
+    
+    let b = a.pure('b');
+    let d = b.pure("kkk");
+
+    match d.parse("abcd", 0) {
+        ParseResult::Success { value, location } => {
+            assert!(true);
+            println!("{}", value)
+        },
+        _ => assert!(false)
+    }
+
+
 }

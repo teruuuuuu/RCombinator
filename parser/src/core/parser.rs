@@ -8,8 +8,6 @@ pub struct Parser<'a, A> {
     pub parse: Rc<Parse<'a, A>>,
 }
 
-pub(crate) struct ParsersImpl;
-
 impl<'a, A> Parser<'a, A> {
     pub fn new<F>(parse: F) -> Parser<'a, A>
     where
@@ -32,8 +30,9 @@ impl<'a, A> Clone for Parser<'a, A> {
 pub trait ParserTrait<'a> {
     type Output;
     type ParserNext<'m, X>: ParserTrait<'m, Output = X>;
-    
+
     fn parse(&self, input: &'a str, location: usize) -> ParseResult<Self::Output>;
+
 }
 
 impl<'a, A> ParserTrait<'a> for Parser<'a, A> {
@@ -62,7 +61,7 @@ impl<'a, A> ParserFunctuor<'a> for Parser<'a, A> {
     {
         Parser::new(move |input, location| match self.parse(input, location) {
             ParseResult::Success { value, location } => ParseResult::successful(f(value), location),
-            ParseResult::Failure { message, location } => ParseResult::failure(message, location)
+            ParseResult::Failure { message, location } => ParseResult::failure(message, location),
         })
     }
 }
@@ -74,10 +73,6 @@ pub trait ParserMonad<'a>: ParserFunctuor<'a> {
         Self::Output: Clone + 'a,
         B: Clone + 'a;
 
-    fn pure<F>(self, f: F) -> Self::ParserNext<'a, Self::Output>
-    where
-        F: Fn() -> Self::Output + 'a,
-        Self::Output: Clone + 'a;
 }
 
 impl<'a, A> ParserMonad<'a> for Parser<'a, A> {
@@ -97,46 +92,4 @@ impl<'a, A> ParserMonad<'a> for Parser<'a, A> {
         )
     }
 
-    fn pure<F>(self, f: F) -> Self::ParserNext<'a, Self::Output>
-    where
-        F: Fn() -> Self::Output + 'a,
-        Self::Output: Clone + 'a,
-    {
-        ParsersImpl::successful_lazy(f)
-    }
-}
-
-pub trait Parsers {
-    type ParserNext<'a, A>: ParserMonad<'a, Output = A>
-    where
-        A: 'a;
-
-    fn successful<'a, A>(value: A) -> Self::ParserNext<'a, A>
-    where
-        A: Clone + 'a;
-
-    fn successful_lazy<'a, A, F>(value: F) -> Self::ParserNext<'a, A>
-    where
-        F: Fn() -> A + 'a,
-        A: 'a;
-}
-
-impl Parsers for ParsersImpl {
-    // ParserTraitのlifetime境界対策
-    type ParserNext<'a, A>  = Parser<'a, A> where A: 'a;
-
-    fn successful<'a, A>(value: A) -> Self::ParserNext<'a, A>
-    where
-        A: Clone + 'a,
-    {
-        Parser::new(move |_input, location| ParseResult::successful(value.clone(), location))
-    }
-
-    fn successful_lazy<'a, A, F>(value: F) -> Self::ParserNext<'a, A>
-    where
-        F: Fn() -> A + 'a,
-        A: 'a,
-    {
-        Parser::new(move |_input, location| ParseResult::successful(value(), location))
-    }
 }
