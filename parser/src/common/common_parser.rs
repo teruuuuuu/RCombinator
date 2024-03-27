@@ -1,138 +1,158 @@
+use std::vec;
+
 use crate::core::parse_result::*;
 use crate::core::parser::*;
+use crate::core::parser_input::ParserInput;
 use crate::core::parser_methods::ParserMethods;
 
+const CR_CODE: u8 = 13;
+const LF_CODE: u8 = 10;
+
 pub fn char<'a>(c: char) -> Parser<'a, char> {
-    Parser::new(move |input: &str, location: usize| {
-        let chars = input.chars();
-        let count = chars.count();
-        if location >= count {
-            ParseResult::Failure {
-                message: format!("index invalid "),
-                location,
-            }
-        } else {
-            match input.chars().nth(location) {
-                Some(d) if c == d => ParseResult::Success {
-                    value: c,
-                    location: location + 1,
-                },
-                _ => ParseResult::Failure {
+    Parser::new(move |input: &mut ParserInput<'a>, location: usize| {
+        // 最大4バイト
+        let mut tmp = [0u8; 4];
+        let bytes = c.encode_utf8(&mut tmp).as_bytes();;
+        let len = bytes.len();
+
+        match input.read_by_size(location, len) {
+            Result::Ok(txt) => {
+                if txt == bytes {
+                    ParseResult::Success { 
+                        value: c, 
+                        location: location + len 
+                    }
+                } else {
+                    ParseResult::Failure {
+                        message: format!("not match "),
+                        location
+                    }
+                }
+            }, 
+            Result::Err(err) => {
+                ParseResult::Failure {
                     message: format!("not match "),
-                    location,
-                },
+                    location
+                }
             }
         }
     })
 }
 
 pub fn end<'a>() -> Parser<'a, ()> {
-    Parser::new(move |input: &str, location: usize| {
-        if input.len() == location {
-            ParseResult::Success {
-                value: (),
+    Parser::new(move |input: &mut ParserInput<'a>, location: usize| {
+        if input.has_more(location) {
+            ParseResult::Failure {
+                message: format!("not end current location{:?}, substring{:?}", location, input.read_line(location)),
                 location,
             }
         } else {
-            ParseResult::Failure {
-                message: format!("not end current location{:?}, expected locatoin{:?}", location, input.len()),
-                location,
+            ParseResult::Success { value: (), location }
+        }
+    })
+}
+
+pub fn head<'a>() -> Parser<'a, ()> {
+    Parser::new(move |input: &mut ParserInput<'a>, location: usize| {
+        if location == 0 {
+            ParseResult::Success { value: (), location }
+        } else {
+            match input.read_by_size(location - 1, 2) {
+                Result::Ok(bytes) => {
+                    if bytes[0] == CR_CODE || bytes[0] == LF_CODE {
+                        ParseResult::Success { value: (), location }
+                    } else {
+                        ParseResult::Failure {
+                            message: format!("not head"),
+                            location,
+                        }
+                    }
+                },
+                Result::Err(_err) => {
+                    ParseResult::Failure {
+                        message: format!("read failed"),
+                        location,
+                    }
+                }
             }
         }
     })
 }
 
 pub fn literal<'a>(v: &'a str) -> Parser<'a, &str> {
-    Parser::new(move |input: &str, location: usize| {
-        if input[location..].starts_with(v) {
-            ParseResult::Success {
-                value: v,
-                location: location + v.len(),
-            }
-        } else {
-            ParseResult::Failure {
-                message: format!("not match "),
-                location,
+    Parser::new(move |input: &mut ParserInput<'a>, location: usize| {
+        let bytes = v.as_bytes();
+        let len = bytes.len();
+
+        match input.read_by_size(location, len) {
+            Result::Ok(reads) => {
+                if reads == bytes {
+                    ParseResult::Success { 
+                        value: v, 
+                        location: location + len
+                    }
+                } else {
+                    ParseResult::Failure {
+                        message: format!("text not equal."),
+                        location,
+                    }
+                }
+            },
+            Result::Err(_err) => {
+                ParseResult::Failure {
+                    message: format!("read error location[{}] len[{}]", location, len),
+                    location,
+                }
             }
         }
     })
 }
 
 
-
 #[test]
 fn test_char() {
-    let p1 = char('a');
-    let p2 = char('b');
-    let p3 = p1 + p2;
+    let parser = char('a') + char('b');
 
-    match p3.parse("abcd", 0) {
+    match parser.parse(&mut ParserInput::text("abcd"), 0) {
         ParseResult::Success { value, location } => {
             assert!(true);
+            assert_eq!(('a', 'b'), value);
+            assert_eq!(2, location)
         }
         _ => assert!(false),
     }
 
-    match p3.parse("abcd", 0) {
+    let parser = char('a').seq1() + end();
+    match parser.parse(&mut ParserInput::text("aaaa"), 0) {
         ParseResult::Success { value, location } => {
             assert!(true);
+            assert_eq!((vec!['a', 'a', 'a', 'a'], ()), value);
+            assert_eq!(4, location);
         }
         _ => assert!(false),
     }
 
-    let a = char('a');
-
-    let b = a.pure('b');
-    let d = b.pure("kkk");
-
-    match d.parse("abcd", 0) {
+    let parser = (char('🍣') | char('🍺')).seq0() + end();
+    match parser.parse(&mut ParserInput::text("🍣🍣🍺🍺🍣🍺🍺"), 0) {
         ParseResult::Success { value, location } => {
             assert!(true);
+            assert_eq!((vec!['🍣', '🍣', '🍺', '🍺', '🍣', '🍺', '🍺'], ()), value);
+            assert_eq!(28, location);
         }
         _ => assert!(false),
     }
-
-    let p1 = char('🍣');
-    match p1.parse("🍣abcd", 0) {
-        ParseResult::Success { value, location } => {
-            assert!(true);
-        }
-        _ => assert!(false),
-    }
-}
-
-#[test]
-fn test_end() {
-    let parser = literal("abcdefg").skip_right(end());
-    match parser.parse("abcdefg", 0) {
-        ParseResult::Success { value, location } => {
-            assert!(true);
-            assert_eq!(value, "abcdefg");
-            assert_eq!(location, "abcdefg".len());
-        }
-        _ => assert!(false),
-    }
-
+    
 }
 
 #[test]
 fn test_literal() {
-    let parser = literal("abcdefg");
-    match parser.parse("abcdefghi", 0) {
+    let parser = head() + literal("stuvwxyz.");
+    match parser.parse(&mut ParserInput::text("abc\ndef\nstuvwxyz."), 8) {
         ParseResult::Success { value, location } => {
             assert!(true);
-            assert_eq!(value, "abcdefg");
-            assert_eq!(location, "abcdefg".len());
-        }
-        _ => assert!(false),
-    }
-
-    let parser = literal("abcdefghi");
-    match parser.parse("abcdefg", 0) {
-        ParseResult::Failure { message, location } => {
-            assert!(true);
+            assert_eq!(((), "stuvwxyz."), value);
+            assert_eq!(17, location);
         }
         _ => assert!(false),
     }
 }
-

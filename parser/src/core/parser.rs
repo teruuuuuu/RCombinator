@@ -1,8 +1,9 @@
 use crate::core::parse_result::ParseResult;
+use crate::core::parser_input::ParserInput;
 
 use std::rc::Rc;
 
-type Parse<'a, A> = dyn Fn(&'a str, usize) -> ParseResult<A> + 'a;
+type Parse<'a, A> = dyn Fn(&mut ParserInput<'a>, usize) -> ParseResult<A> + 'a;
 
 pub struct Parser<'a, A> {
     pub parse: Rc<Parse<'a, A>>,
@@ -11,7 +12,7 @@ pub struct Parser<'a, A> {
 impl<'a, A> Parser<'a, A> {
     pub fn new<F>(parse: F) -> Parser<'a, A>
     where
-        F: Fn(&'a str, usize) -> ParseResult<A> + 'a,
+        F: Fn(&mut ParserInput<'a>, usize) -> ParseResult<A> + 'a,
     {
         Parser {
             parse: Rc::new(parse),
@@ -31,7 +32,7 @@ pub trait ParserTrait<'a> {
     type Output;
     type ParserNext<'m, X>: ParserTrait<'m, Output = X>;
 
-    fn parse(&self, input: &'a str, location: usize) -> ParseResult<Self::Output>;
+    fn parse(&self, input: &mut ParserInput<'a>, location: usize) -> ParseResult<Self::Output>;
 
 }
 
@@ -39,7 +40,7 @@ impl<'a, A> ParserTrait<'a> for Parser<'a, A> {
     type Output = A;
     type ParserNext<'m, X> = Parser<'m, X>;
 
-    fn parse(&self, input: &'a str, location: usize) -> ParseResult<Self::Output> {
+    fn parse(&self, input: &mut ParserInput<'a>, location: usize) -> ParseResult<Self::Output> {
         (self.parse)(input, location)
     }
 }
@@ -83,7 +84,7 @@ impl<'a, A> ParserMonad<'a> for Parser<'a, A> {
         B: Clone + 'a,
     {
         Parser::new(
-            move |input: &str, location: usize| match self.parse(input, location) {
+            move |input: &mut ParserInput<'a>, location: usize| match self.parse(input, location) {
                 ParseResult::Success { value, location } => f(value).parse(input, location),
                 ParseResult::Failure { message, location } => {
                     ParseResult::Failure { message, location }

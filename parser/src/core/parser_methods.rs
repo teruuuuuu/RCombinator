@@ -21,10 +21,14 @@ pub trait ParserMethods<'a>: ParserTrait<'a> {
         Self::Output: Clone + 'a,
         B: Clone + 'a;
 
-    fn or<B>(self, parser2: Parser<'a, B>) -> Self::ParserNext<'a, Either<Self::Output, B>>
+    fn either<B>(self, parser2: Parser<'a, B>) -> Self::ParserNext<'a, Either<Self::Output, B>>
     where
         Self::Output: Clone + 'a,
         B: Clone + 'a;
+    
+    fn or(self, parser2: Parser<'a, Self::Output>) -> Self::ParserNext<'a, Self::Output,>
+    where
+        Self::Output: Clone + 'a;
 
     fn pure<B>(self, b: B) -> Self::ParserNext<'a, B>
     where
@@ -79,7 +83,7 @@ impl<'a, A> ParserMethods<'a> for Parser<'a, A> {
         self.and(parser2).map(|v| v.1)
     }
 
-    fn or<B>(self, parser2: Parser<'a, B>) -> Self::ParserNext<'a, Either<Self::Output, B>>
+    fn either<B>(self, parser2: Parser<'a, B>) -> Self::ParserNext<'a, Either<Self::Output, B>>
     where
         Self::Output: Clone + 'a,
         B: Clone + 'a,
@@ -94,6 +98,29 @@ impl<'a, A> ParserMethods<'a> for Parser<'a, A> {
             } => match parser2.parse(input, location) {
                 ParseResult::Success { value, location } => {
                     ParseResult::successful(Either::Right(value), location)
+                }
+                ParseResult::Failure {
+                    message: message2,
+                    location,
+                } => ParseResult::failure(format!("{},{}", message1, message2), location),
+            },
+        })
+    }
+
+    fn or(self, parser2: Parser<'a, Self::Output>) -> Self::ParserNext<'a, Self::Output,>
+    where
+        Self::Output: Clone + 'a
+    {
+        Parser::new(move |input, location| match self.parse(input, location) {
+            ParseResult::Success { value, location } => {
+                ParseResult::successful(value, location)
+            }
+            ParseResult::Failure {
+                message: message1,
+                location,
+            } => match parser2.parse(input, location) {
+                ParseResult::Success { value, location } => {
+                    ParseResult::successful(value, location)
                 }
                 ParseResult::Failure {
                     message: message2,
@@ -129,7 +156,7 @@ impl<'a, A> ParserMethods<'a> for Parser<'a, A> {
                     _ => break
                 }
             }
-            ParseResult::successful(vec, location)
+            ParseResult::successful(vec, cur_location)
         })
     }
 
@@ -159,7 +186,7 @@ impl<'a, A> ParserMethods<'a> for Parser<'a, A> {
                     }
                 }
                 if vec.len() > 0 {
-                    ParseResult::successful(vec, location)
+                    ParseResult::successful(vec, cur_location)
                 } else {
                     ParseResult::Failure { message: "not matched".to_owned(), location }
                 }
