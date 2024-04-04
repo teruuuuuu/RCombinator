@@ -1,5 +1,6 @@
 pub mod add_parser;
 pub mod bidor_parser;
+pub mod common_parsers;
 pub mod either;
 pub mod error;
 pub mod parser_input;

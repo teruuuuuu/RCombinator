@@ -1,11 +1,9 @@
-
 use std::error::Error;
 use std::fs::{File, FileType};
 use std::io::{BufReader, Read, Seek, SeekFrom};
 use std::sync::Mutex;
 
 use crate::core::error::MyError;
-
 
 const BUF_SIZE: usize = 4096;
 const NULL_CODE: u8 = 0;
@@ -14,21 +12,36 @@ const LF_CODE: u8 = 10;
 
 pub enum ParserInput<'a> {
     Text(&'a str),
-    File{reader: Mutex<BufReader<File>>, buffer: Mutex<[u8; BUF_SIZE]>, buffer_seek: Mutex<u64>, buffer_read: Mutex<usize>}
+    File {
+        reader: Mutex<BufReader<File>>,
+        buffer: Mutex<[u8; BUF_SIZE]>,
+        buffer_seek: Mutex<u64>,
+        buffer_read: Mutex<usize>,
+    },
 }
 
-impl <'a>ParserInput<'a> {
-
+impl<'a> ParserInput<'a> {
     pub fn text<'b>(str: &'b str) -> ParserInput<'b> {
         ParserInput::Text(&str)
     }
 
     pub fn file<'b>(file: File) -> ParserInput<'b> {
-        let reader = Mutex::new(BufReader::new(file));
-        let buffer = Mutex::new([0; BUF_SIZE]);
-        let buffer_seek = Mutex::new(0);
-        let buffer_read = Mutex::new(0);
-        ParserInput::File { reader, buffer, buffer_seek, buffer_read }
+        let mut reader = Mutex::new(BufReader::new(file));
+        let mut buffer = Mutex::new([0; BUF_SIZE]);
+        let mut buffer_seek = Mutex::new(0);
+        let mut buffer_read = Mutex::new(0);
+
+        let mut_reader = reader.get_mut().unwrap();
+        let mut_buffer = buffer.get_mut().unwrap();
+        let mut_buffer_seek = buffer_seek.get_mut().unwrap();
+        let mut_buffer_read = buffer_read.get_mut().unwrap();
+        ParserInput::load_buf(mut_reader, mut_buffer, mut_buffer_seek, mut_buffer_read, 0);
+        ParserInput::File {
+            reader,
+            buffer,
+            buffer_seek,
+            buffer_read,
+        }
     }
 
     pub fn has_more(&mut self, offset: usize) -> bool {
@@ -36,17 +49,40 @@ impl <'a>ParserInput<'a> {
             ParserInput::Text(text) => {
                 let bytes = text.as_bytes();
                 bytes.len() > offset
-            },
-            ParserInput::File{reader, buffer, buffer_seek, buffer_read} => {
+            }
+            ParserInput::File {
+                reader,
+                buffer,
+                buffer_seek,
+                buffer_read,
+            } => {
                 let mut_reader = reader.get_mut().unwrap();
                 let mut_buffer = buffer.get_mut().unwrap();
                 let mut_buffer_seek = buffer_seek.get_mut().unwrap();
                 let mut_buffer_read = buffer_read.get_mut().unwrap();
 
+                if !(*mut_buffer_seek <= offset as u64
+                    && (*mut_buffer_seek + *mut_buffer_read as u64) >= offset as u64)
+                {
+                    ParserInput::load_buf(
+                        mut_reader,
+                        mut_buffer,
+                        mut_buffer_seek,
+                        mut_buffer_read,
+                        offset as u64,
+                    );
+                }
+
                 if *mut_buffer_read < BUF_SIZE {
                     *mut_buffer_seek as usize + *mut_buffer_read > offset
                 } else {
-                    ParserInput::load_buf(mut_reader, mut_buffer, mut_buffer_seek, mut_buffer_read, offset as u64);
+                    ParserInput::load_buf(
+                        mut_reader,
+                        mut_buffer,
+                        mut_buffer_seek,
+                        mut_buffer_read,
+                        offset as u64,
+                    );
                     *mut_buffer_seek as usize + *mut_buffer_read > offset
                 }
             }
@@ -83,8 +119,13 @@ impl <'a>ParserInput<'a> {
                     }
                 }
                 vec
-            },
-            ParserInput::File{reader, buffer, buffer_seek, buffer_read} => {
+            }
+            ParserInput::File {
+                reader,
+                buffer,
+                buffer_seek,
+                buffer_read,
+            } => {
                 let mut_reader = reader.get_mut().unwrap();
                 let mut_buffer = buffer.get_mut().unwrap();
                 let mut_buffer_seek = buffer_seek.get_mut().unwrap();
@@ -95,14 +136,26 @@ impl <'a>ParserInput<'a> {
 
                 let mut curr_buffer_offset = offset as u64;
                 let mut curr_buffer_index = 0;
-                ParserInput::load_buf(mut_reader, mut_buffer, mut_buffer_seek, mut_buffer_read, curr_buffer_offset);
+                ParserInput::load_buf(
+                    mut_reader,
+                    mut_buffer,
+                    mut_buffer_seek,
+                    mut_buffer_read,
+                    curr_buffer_offset,
+                );
                 loop {
                     if *mut_buffer_read <= 0 {
                         break;
                     } else if curr_buffer_index >= *mut_buffer_read {
                         curr_buffer_offset = curr_buffer_offset + curr_buffer_index as u64;
                         curr_buffer_index = 0;
-                        ParserInput::load_buf(mut_reader, mut_buffer, mut_buffer_seek, mut_buffer_read, curr_buffer_offset);
+                        ParserInput::load_buf(
+                            mut_reader,
+                            mut_buffer,
+                            mut_buffer_seek,
+                            mut_buffer_read,
+                            curr_buffer_offset,
+                        );
                     }
 
                     if mut_buffer[curr_buffer_index] == NULL_CODE {
@@ -135,8 +188,13 @@ impl <'a>ParserInput<'a> {
                 } else {
                     Result::Err(MyError::Common("offset over".to_owned()))
                 }
-            },
-            ParserInput::File{reader, buffer, buffer_seek, buffer_read} => {
+            }
+            ParserInput::File {
+                reader,
+                buffer,
+                buffer_seek,
+                buffer_read,
+            } => {
                 let mut_reader = reader.get_mut().unwrap();
                 let mut_buffer = buffer.get_mut().unwrap();
                 let mut_buffer_seek = buffer_seek.get_mut().unwrap();
@@ -144,30 +202,87 @@ impl <'a>ParserInput<'a> {
                 if size > BUF_SIZE {
                     Result::Err(MyError::Common("buffer over".to_owned()))
                 } else {
-                    if !(*mut_buffer_seek <= offset as u64 && (*mut_buffer_seek + *mut_buffer_read as u64) >= (offset as u64+ size as u64)) {
-                        ParserInput::load_buf(mut_reader, mut_buffer, mut_buffer_seek, mut_buffer_read, offset as u64);
+                    if !(*mut_buffer_seek <= offset as u64
+                        && (*mut_buffer_seek + *mut_buffer_read as u64)
+                            >= (offset as u64 + size as u64))
+                    {
+                        ParserInput::load_buf(
+                            mut_reader,
+                            mut_buffer,
+                            mut_buffer_seek,
+                            mut_buffer_read,
+                            offset as u64,
+                        );
                     }
-                    if *mut_buffer_seek <= offset as u64 && (*mut_buffer_seek + *mut_buffer_read as u64) >= (offset as u64+ size as u64) {
+                    if *mut_buffer_seek <= offset as u64
+                        && (*mut_buffer_seek + *mut_buffer_read as u64)
+                            >= (offset as u64 + size as u64)
+                    {
                         let buf_from = offset - *mut_buffer_seek as usize;
                         let buf_to = buf_from + size;
                         Result::Ok(&mut_buffer[buf_from..buf_to])
                     } else {
                         Result::Err(MyError::Common("offset over".to_owned()))
                     }
-                    
-                    
                 }
-            },
+            }
         }
     }
 
-    fn load_buf(buf_reader: &mut BufReader<File>, buffer: &mut [u8; BUF_SIZE], buffer_seek: &mut u64, buffer_read: &mut usize, offset: u64) {
+    fn load_buf(
+        buf_reader: &mut BufReader<File>,
+        buffer: &mut [u8; BUF_SIZE],
+        buffer_seek: &mut u64,
+        buffer_read: &mut usize,
+        offset: u64,
+    ) {
         buffer.iter_mut().for_each(|m| *m = 0);
         *buffer_seek = buf_reader.seek(SeekFrom::Start(offset)).unwrap();
         *buffer_read = buf_reader.read(buffer).unwrap();
     }
 }
 
+#[test]
+fn test_txt() {
+    let mut curr_index = 0;
+    let mut a = ParserInput::text("abc\ndef\nghi\n");
+
+    while a.has_more(curr_index + 1) {
+        match a.read_by_size(curr_index, 2) {
+            Result::Ok(read) => {
+                println!("curr_index[{}]", curr_index);
+                println!("{:?}", read);
+                println!("");
+            }
+            Result::Err(_) => {
+                assert!(false);
+            }
+        };
+        curr_index = curr_index + 1;
+    }
+}
+
+#[test]
+fn test_file() {
+    let mut curr_index = 0;
+    let file = File::open("./test/test_file.txt").unwrap();
+    println!("{:?}", file);
+    let mut a = ParserInput::file(file);
+
+    while a.has_more(curr_index + 1) {
+        match a.read_by_size(curr_index, 2) {
+            Result::Ok(read) => {
+                println!("curr_index[{}]", curr_index);
+                println!("{:?}", read);
+                println!("");
+            }
+            Result::Err(_) => {
+                assert!(false);
+            }
+        };
+        curr_index = curr_index + 1;
+    }
+}
 
 // #[test]
 // fn test3() {
@@ -192,4 +307,3 @@ impl <'a>ParserInput<'a> {
 //         curr_index = curr_index + 1;
 //     }
 // }
-
