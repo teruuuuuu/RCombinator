@@ -251,7 +251,7 @@ fn test_txt() {
         match a.read_by_size(curr_index, 2) {
             Result::Ok(read) => {
                 println!("curr_index[{}]", curr_index);
-                println!("{:?}", read);
+                println!("{:?}", std::str::from_utf8(read));
                 println!("");
             }
             Result::Err(_) => {
@@ -273,7 +273,7 @@ fn test_file() {
         match a.read_by_size(curr_index, 2) {
             Result::Ok(read) => {
                 println!("curr_index[{}]", curr_index);
-                println!("{:?}", read);
+                println!("{:?}", std::str::from_utf8(read));
                 println!("");
             }
             Result::Err(_) => {
@@ -283,27 +283,3 @@ fn test_file() {
         curr_index = curr_index + 1;
     }
 }
-
-// #[test]
-// fn test3() {
-//     let mut a = ParserInput::text("abc\rdef\nghijkl\r\n");
-//     let mut curr_index = 0;
-//     while a.has_more(curr_index) {
-//         let read = a.read_by_size(curr_index, 2);
-//         println!("curr_index[{}]", curr_index);
-//         println!("{:?}", read);
-//         println!("");
-//         curr_index = curr_index + 1;
-//     }
-
-//     curr_index = 0;
-//     let file = File::open("../test.txt").unwrap();
-//     let mut a = ParserInput::file(file);
-//     while a.has_more(curr_index) {
-//         let read = a.read_by_size(curr_index, 2);
-//         println!("curr_index[{}]", curr_index);
-//         println!("{:?}", read);
-//         println!("");
-//         curr_index = curr_index + 1;
-//     }
-// }

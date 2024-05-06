@@ -4,6 +4,8 @@ use crate::core::parser::*;
 use crate::core::parser_input::ParserInput;
 use crate::core::parser_methods::ParserMethods;
 
+use super::parse_context::ParseContext;
+
 const CR_CODE: u8 = 13;
 const LF_CODE: u8 = 10;
 const SPACE_CODE: u8 = b' ';
@@ -25,28 +27,40 @@ where
     C: 'a + Clone,
     D: 'a + Clone
 {
-    let inner_parser = Parser::new(move |input, location| {
-        let mut current_location = location;
+    let inner_parser = Parser::new(move |input, context| {
+        let mut current_context = context;
         let mut vec = Vec::new();
-        if let ParseResult::Success { value, location } = parser.parse(input, current_location) {
-            vec.push(value);
-            current_location = location;
-        } else {
-            return ParseResult::Success { value: vec, location: current_location };
-        }
-        let mut location_tmp;
-        loop {
-            if let ParseResult::Success { value:_, location } = separator.parse(input, current_location) {
-                location_tmp = current_location;
-                current_location = location;
-            } else {
-                return ParseResult::Success { value: vec, location: current_location };
-            }
-            if let ParseResult::Success { value, location } = parser.parse(input, current_location) {
+
+        let (next_contet, parse_result) = parser.parse(input, current_context);
+        match parse_result {
+            ParseResult::Success { value } => {
                 vec.push(value);
-                current_location = location;
-            } else {
-                return ParseResult::Success { value: vec, location: location_tmp };
+                current_context = &mut next_contet.clone();
+            }
+            ParseResult::Failure { } => {
+                return (next_contet, ParseResult::failure());
+            }
+        }
+
+        loop {
+            let (next_context1, parse_result1) = separator.parse(input, &mut current_context.clone());
+            match parse_result1 {
+                ParseResult::Success { value } => {
+
+                }
+                ParseResult::Failure { } => {
+                    return (next_contet, ParseResult::successful(vec));
+                }
+            }
+            let (next_context2, parse_result2) = parser.parse(input, &mut next_context1);
+            match parse_result2 {
+                ParseResult::Success { value } => {
+                    vec.push(value);
+                    current_context = &mut next_context2.clone();
+                }
+                ParseResult::Failure { } => {
+                    return (*current_context, ParseResult::successful(vec));
+                }
             }
         }
     });
@@ -67,38 +81,20 @@ fn test_array() {
 }
 
 pub fn break_line<'a>() -> Parser<'a, ()> {
-    Parser::new(move |input: &mut ParserInput<'a>, location: usize| {
-        match input.read_by_size(location, 1) {
+    Parser::new(move |input, context| {
+        match input.read_by_size(context.location, 1) {
             Result::Ok(read1) => match read1[0] {
-                CR_CODE => match input.read_by_size(location + 1, 1) {
+                CR_CODE => match input.read_by_size(context.location + 1, 1) {
                     Result::Ok(read2) => match read2[0] {
-                        LF_CODE => ParseResult::Success {
-                            value: (),
-                            location: location + 2,
-                        },
-                        _ => ParseResult::Success {
-                            value: (),
-                            location: location + 1,
-                        },
-                    },
-                    _ => ParseResult::Success {
-                        value: (),
-                        location: location + 1,
-                    },
+                        LF_CODE => (context.move_location(2),ParseResult::successful(())),
+                        _ => (context.move_location(1),ParseResult::successful(()))
+                    }
+                    _ => (context.move_location(1),ParseResult::successful(()))
                 },
-                LF_CODE => ParseResult::Success {
-                    value: (),
-                    location: location + 1,
-                },
-                _ => ParseResult::Failure {
-                    message: format!("read failed"),
-                    location,
-                },
+                LF_CODE => (context.move_location(1),ParseResult::successful(())),
+                _ => (context.new_error("break_line", "read failed"), ParseResult::failure()),
             },
-            Result::Err(_error) => ParseResult::Failure {
-                message: format!("read failed"),
-                location,
-            },
+            Result::Err(_error) => (context.new_error("break_line", "read failed"), ParseResult::failure())
         }
     })
 }
@@ -106,12 +102,12 @@ pub fn break_line<'a>() -> Parser<'a, ()> {
 #[test]
 fn test_break_line() {
     let break_line_parser = break_line();
-    match break_line_parser.parse(&mut ParserInput::text("abc\ndef"), 3) {
-        ParseResult::Success { value, location } => {
+    match break_line_parser.parse(&mut ParserInput::text("abc\ndef"), &mut ParseContext::new_context(3)) {
+        (next_context, ParseResult::Success { value }) => {
             assert!(true);
-            assert_eq!(location, 4);
+            assert_eq!(next_context.location, 4);
         }
-        ParseResult::Failure { message, location } => {
+        (next_context, ParseResult::Failure { }) => {
             assert!(false);
         }
     }

@@ -3,6 +3,7 @@ use crate::core::either::Either;
 use crate::core::parser::Parser;
 
 use super::common_parsers::{self, end};
+use super::parse_context::ParseContext;
 use super::parse_result::ParseResult;
 use super::parser::ParserMonad;
 use super::parser::{ParserFunctuor, ParserTrait};
@@ -99,21 +100,18 @@ impl<'a, A> ParserMethods<'a> for Parser<'a, A> {
         Self::Output: Clone + 'a,
         B: Clone + 'a,
     {
-        Parser::new(move |input, location| match self.parse(input, location) {
-            ParseResult::Success { value, location } => {
-                ParseResult::successful(Either::Left(value), location)
+        Parser::new(move |input, context| match self.parse(input, context) {
+            (nextContext, ParseResult::Success { value }) => {
+                (nextContext, ParseResult::successful(Either::Left(value)))
             }
-            ParseResult::Failure {
-                message: message1,
-                location,
-            } => match parser2.parse(input, location) {
-                ParseResult::Success { value, location } => {
-                    ParseResult::successful(Either::Right(value), location)
+            (nextContext1, ParseResult::Failure {}) => match parser2.parse(input, context) {
+                (nextContext2, ParseResult::Success { value }) => {
+                    (nextContext2, ParseResult::successful(Either::Right(value)))
                 }
-                ParseResult::Failure {
-                    message: message2,
-                    location,
-                } => ParseResult::failure(format!("{},{}", message1, message2), location),
+                (nextContext2, ParseResult::Failure {}) => (
+                    context.new_error("either", "no valid parsers").add_error(&nextContext1).add_error(&nextContext2),
+                    ParseResult::failure()
+                ),
             },
         })
     }
@@ -122,9 +120,11 @@ impl<'a, A> ParserMethods<'a> for Parser<'a, A> {
     where
         Self::Output: Clone + 'a,
     {
-        Parser::new(move |input, location| match self.parse(input, location) {
-            ParseResult::Success { value, location } => ParseResult::successful(Option::Some(value), location),
-            ParseResult::Failure { message,location} => ParseResult::successful(Option::None, location)
+        Parser::new(move |input, context| match self.parse(input, context) {
+            (nextContext, ParseResult::Success { value }) 
+                => (nextContext, ParseResult::successful(Option::Some(value))),
+                (nextContext, ParseResult::Failure {}) 
+                => (nextContext, ParseResult::successful(Option::None))
         })
     }
 
@@ -132,19 +132,19 @@ impl<'a, A> ParserMethods<'a> for Parser<'a, A> {
     where
         Self::Output: Clone + 'a,
     {
-        Parser::new(move |input, location| match self.parse(input, location) {
-            ParseResult::Success { value, location } => ParseResult::successful(value, location),
-            ParseResult::Failure {
-                message: message1,
-                location,
-            } => match parser2.parse(input, location) {
-                ParseResult::Success { value, location } => {
-                    ParseResult::successful(value, location)
+        Parser::new(move |input, context| match self.parse(input, context) {
+            (nextContext1, ParseResult::Success { value }) 
+                => (nextContext1, ParseResult::successful(value)),
+            (nextContext1, ParseResult::Failure {}) => match parser2.parse(input, context) {
+                (nextContext2, ParseResult::Success { value }) => {
+                    (nextContext2, ParseResult::successful(value))
                 }
-                ParseResult::Failure {
-                    message: message2,
-                    location,
-                } => ParseResult::failure(format!("{},{}", message1, message2), location),
+                (nextContext2, ParseResult::Failure {}) => 
+                    (
+                        context.new_error("or", "no valid parsers").add_error(&nextContext1).add_error(&nextContext2)
+                        , ParseResult::failure(),
+                    )
+                    
             },
         })
     }
@@ -161,19 +161,19 @@ impl<'a, A> ParserMethods<'a> for Parser<'a, A> {
     where
         Self::Output: Clone + 'a,
     {
-        Parser::new(move |input, location| {
+        Parser::new(move |input, context| {
             let mut vec = Vec::<Self::Output>::new();
-            let mut cur_location = location;
+            let mut cur_context = context;
             loop {
-                match self.parse(input, cur_location) {
-                    ParseResult::Success { value, location } => {
+                match self.parse(input, cur_context) {
+                    (next_context, ParseResult::Success { value }) => {
                         vec.push(value);
-                        cur_location = location;
+                        cur_context = &mut next_context.clone();
                     }
                     _ => break,
                 }
             }
-            ParseResult::successful(vec, cur_location)
+            (*cur_context,  ParseResult::successful(vec))
         })
     }
 
@@ -190,25 +190,23 @@ impl<'a, A> ParserMethods<'a> for Parser<'a, A> {
         //         }
         //     })
         // })
-        Parser::new(move |input, location| {
+        Parser::new(move |input, context| {
             let mut vec = Vec::<Self::Output>::new();
-            let mut cur_location = location;
+            let mut cur_context = context;
+            let mut cur_context = context;
             loop {
-                match self.parse(input, cur_location) {
-                    ParseResult::Success { value, location } => {
+                match self.parse(input, cur_context) {
+                    (next_context, ParseResult::Success { value }) => {
                         vec.push(value);
-                        cur_location = location;
+                        cur_context = &mut next_context.clone();
                     }
                     _ => break,
                 }
             }
             if vec.len() > 0 {
-                ParseResult::successful(vec, cur_location)
+                (*cur_context,  ParseResult::successful(vec))
             } else {
-                ParseResult::Failure {
-                    message: "not matched".to_owned(),
-                    location,
-                }
+                (*cur_context,  ParseResult::failure())
             }
         })
     }
@@ -243,13 +241,13 @@ fn test_skip_space() {
         .seq0()
         .with_skip_space()
         .skip_right(end());
-    match parser.parse(&mut ParserInput::text(" \t\n \r\naaa"), 0) {
-        ParseResult::Success { value, location } => {
+    match parser.parse(&mut ParserInput::text(" \t\n \r\naaa"), &mut ParseContext::new_context(0)) {
+        (next_context, ParseResult::Success { value }) => {
             assert!(true);
-            assert_eq!(location, 9);
+            assert_eq!(next_context.location, 9);
             assert_eq!(value, vec!['a', 'a', 'a']);
         }
-        ParseResult::Failure { message, location } => {
+        (next_context, ParseResult::Failure { }) => {
             assert!(false);
         }
     }
