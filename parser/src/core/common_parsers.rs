@@ -29,37 +29,39 @@ where
 {
     let inner_parser = Parser::new(move |input, context| {
         let mut current_context = context;
+        let mut new_context;
         let mut vec = Vec::new();
 
         let (next_contet, parse_result) = parser.parse(input, current_context);
         match parse_result {
             ParseResult::Success { value } => {
                 vec.push(value);
-                current_context = &mut next_contet.clone();
+                new_context = next_contet;
+                current_context = &mut new_context;
             }
             ParseResult::Failure { } => {
                 return (next_contet, ParseResult::failure());
             }
         }
 
-        loop {
-            let (next_context1, parse_result1) = separator.parse(input, &mut current_context.clone());
-            match parse_result1 {
-                ParseResult::Success { value } => {
 
-                }
+        loop {
+            let (mut next_context1, parse_result1) = separator.parse(input, &mut current_context.clone());
+            match parse_result1 {
+                ParseResult::Success { value } => {},
                 ParseResult::Failure { } => {
-                    return (next_contet, ParseResult::successful(vec));
+                    return (current_context.clone(), ParseResult::successful(vec));
                 }
             }
             let (next_context2, parse_result2) = parser.parse(input, &mut next_context1);
             match parse_result2 {
                 ParseResult::Success { value } => {
                     vec.push(value);
-                    current_context = &mut next_context2.clone();
+                    new_context = next_context2;
+                    current_context = &mut new_context;
                 }
                 ParseResult::Failure { } => {
-                    return (*current_context, ParseResult::successful(vec));
+                    return (current_context.clone(), ParseResult::successful(vec));
                 }
             }
         }
@@ -71,11 +73,11 @@ where
 #[test]
 fn test_array() {
     let parser = array(number_i32().with_skip_space(), char('[').with_skip_space(), char(']').with_skip_space(),char(',').with_skip_space());
-    let r = parser.parse(&mut ParserInput::text("[ 123 , 456 , 789 ]"), 0);
+    let (next_context, r) = parser.parse(&mut ParserInput::text("[ 123 , 456 , 789 ]"), &mut ParseContext::new_context(0));
     println!("{:?}", r);
 
     let parser = array(number_i32(), char(','), char(','),char(','));
-    let r = parser.parse(&mut ParserInput::text(",123,456,789,"), 0);
+    let (next_context, r) = parser.parse(&mut ParserInput::text(",123,456,789,"), &mut ParseContext::new_context(0));
     println!("{:?}", r);
 
 }
@@ -114,30 +116,21 @@ fn test_break_line() {
 }
 
 pub fn char<'a>(c: char) -> Parser<'a, char> {
-    Parser::new(move |input: &mut ParserInput<'a>, location: usize| {
+    Parser::new(move |input, context| {
         // 最大4バイト
         let mut tmp = [0u8; 4];
         let bytes = c.encode_utf8(&mut tmp).as_bytes();
         let len = bytes.len();
 
-        match input.read_by_size(location, len) {
+        match input.read_by_size(context.location, len) {
             Result::Ok(txt) => {
                 if txt == bytes {
-                    ParseResult::Success {
-                        value: c,
-                        location: location + len,
-                    }
+                    (context.move_location(len),ParseResult::successful(c))
                 } else {
-                    ParseResult::Failure {
-                        message: format!("not match "),
-                        location,
-                    }
+                    (context.new_error("char", "not match"), ParseResult::failure())
                 }
             }
-            Result::Err(err) => ParseResult::Failure {
-                message: format!("not match "),
-                location,
-            },
+            Result::Err(err) => (context.new_error("char", "read error"), ParseResult::failure())
         }
     })
 }
@@ -146,81 +139,62 @@ pub fn char<'a>(c: char) -> Parser<'a, char> {
 fn test_char() {
     let parser = char('a') + char('b');
 
-    match parser.parse(&mut ParserInput::text("abcd"), 0) {
-        ParseResult::Success { value, location } => {
+    match parser.parse(&mut ParserInput::text("abcd"), &mut ParseContext::new_context(0)) {
+        (next_context, ParseResult::Success { value}) => {
             assert!(true);
             assert_eq!(('a', 'b'), value);
-            assert_eq!(2, location)
+            assert_eq!(2, next_context.location)
         }
         _ => assert!(false),
     }
 
     let parser = char('a').seq1() + end();
-    match parser.parse(&mut ParserInput::text("aaaa"), 0) {
-        ParseResult::Success { value, location } => {
+    match parser.parse(&mut ParserInput::text("aaaa"), &mut ParseContext::new_context(0)) {
+        (next_context, ParseResult::Success { value}) => {
             assert!(true);
             assert_eq!((vec!['a', 'a', 'a', 'a'], ()), value);
-            assert_eq!(4, location);
+            assert_eq!(4, next_context.location);
         }
         _ => assert!(false),
     }
 
     let parser = (char('🍣') | char('🍺')).seq0() + end();
-    match parser.parse(&mut ParserInput::text("🍣🍣🍺🍺🍣🍺🍺"), 0) {
-        ParseResult::Success { value, location } => {
+    match parser.parse(&mut ParserInput::text("🍣🍣🍺🍺🍣🍺🍺"), &mut ParseContext::new_context(0)) {
+        (next_context, ParseResult::Success { value}) => {
             assert!(true);
             assert_eq!((vec!['🍣', '🍣', '🍺', '🍺', '🍣', '🍺', '🍺'], ()), value);
-            assert_eq!(28, location);
+            assert_eq!(28, next_context.location);
         }
         _ => assert!(false),
     }
 }
 
 pub fn end<'a>() -> Parser<'a, ()> {
-    Parser::new(move |input: &mut ParserInput<'a>, location: usize| {
-        if input.has_more(location) {
-            ParseResult::Failure {
-                message: format!(
-                    "not end current location{:?}, substring{:?}",
-                    location,
-                    input.read_line(location)
-                ),
-                location,
-            }
+    Parser::new(move |input, context| {
+        if input.has_more(context.location) {
+            (context.new_error("end", "not end"), ParseResult::failure())
+
         } else {
-            ParseResult::Success {
-                value: (),
-                location,
-            }
+            (context.move_location(0), ParseResult::successful(()))
         }
     })
 }
 
 pub fn head<'a>() -> Parser<'a, ()> {
-    Parser::new(move |input: &mut ParserInput<'a>, location: usize| {
-        if location == 0 {
-            ParseResult::Success {
-                value: (),
-                location,
-            }
+    Parser::new(move |input, context| {
+        if context.location == 0 {
+            (context.move_location(0), ParseResult::successful(()))
         } else {
-            match input.read_by_size(location - 1, 2) {
+            match input.read_by_size(context.location - 1, 2) {
                 Result::Ok(bytes) => {
                     if bytes[0] == CR_CODE || bytes[0] == LF_CODE {
-                        ParseResult::Success {
-                            value: (),
-                            location,
-                        }
+                        (context.move_location(0), ParseResult::successful(()))
                     } else {
-                        ParseResult::Failure {
-                            message: format!("not head"),
-                            location,
-                        }
+                        (context.new_error("head", "not head"), ParseResult::failure())
                     }
                 }
-                Result::Err(_err) => ParseResult::Failure {
-                    message: format!("read failed"),
-                    location,
+                Result::Err(_err) => {
+                    (context.new_error("head", "read failed"), ParseResult::failure())
                 },
             }
         }
@@ -241,27 +215,24 @@ fn lazy_test() {
 }
 
 pub fn literal<'a>(v: &'a str) -> Parser<'a, &str> {
-    Parser::new(move |input: &mut ParserInput<'a>, location: usize| {
+    Parser::new(move |input, context| {
         let bytes = v.as_bytes();
         let len = bytes.len();
 
-        match input.read_by_size(location, len) {
+        match input.read_by_size(context.location, len) {
             Result::Ok(reads) => {
                 if reads == bytes {
-                    ParseResult::Success {
-                        value: v,
-                        location: location + len,
-                    }
+                    (context.move_location(len), ParseResult::successful(v))
                 } else {
-                    ParseResult::Failure {
-                        message: format!("text not equal."),
-                        location,
-                    }
+                    (context.new_error("literal", "text not equal"), ParseResult::failure())
                 }
             }
-            Result::Err(_err) => ParseResult::Failure {
-                message: format!("read error location[{}] len[{}]", location, len),
-                location,
+            Result::Err(_err) => {
+                (
+                    context.new_error(
+                        "literal", 
+                        "read error"), 
+                    ParseResult::failure())
             },
         }
     })
@@ -270,21 +241,21 @@ pub fn literal<'a>(v: &'a str) -> Parser<'a, &str> {
 #[test]
 fn test_literal() {
     let parser = head() + literal("stuvwxyz.");
-    match parser.parse(&mut ParserInput::text("abc\ndef\nstuvwxyz."), 8) {
-        ParseResult::Success { value, location } => {
+    match parser.parse(&mut ParserInput::text("abc\ndef\nstuvwxyz."), &mut ParseContext::new_context(8)) {
+        (next_context, ParseResult::Success { value }) => {
             assert!(true);
             assert_eq!(((), "stuvwxyz."), value);
-            assert_eq!(17, location);
+            assert_eq!(17, next_context.location);
         }
         _ => assert!(false),
     }
 }
 
 pub fn number_i32<'a>() -> Parser<'a, i32> {
-    Parser::new(move |input, location| {
+    Parser::new(move |input, context| {
         let mut sign = 1;
         let mut number = 0;
-        let mut current_location = location;
+        let mut current_location = context.location;
 
         let mut read;
         match input.read_by_size(current_location, 1) {
@@ -292,7 +263,7 @@ pub fn number_i32<'a>() -> Parser<'a, i32> {
                 read = r;
             },
             Result::Err(_) => {
-                return ParseResult::failure("not number".to_owned(), current_location);
+                return (context.new_error("number", "not number"), ParseResult::failure());
             }
         };
         if read == [MINUS_CODE] {
@@ -309,7 +280,7 @@ pub fn number_i32<'a>() -> Parser<'a, i32> {
                 read = r;
             },
             Result::Err(_) => {
-                return ParseResult::failure("not number".to_owned(), current_location);
+                return (context.new_error("number", "not number"), ParseResult::failure());
             }
         };
         if read[0] >= ZERO_CODE && read[0] <= NINE_CODE {
@@ -330,10 +301,9 @@ pub fn number_i32<'a>() -> Parser<'a, i32> {
                     break;
                 }
             }
-
-            ParseResult::successful(sign * number, current_location)
+            (context.new_location(current_location), ParseResult::successful(sign * number))
         } else {
-            ParseResult::failure("not number".to_owned(), current_location)
+            (context.new_error("number", "not number"), ParseResult::failure())
         }
     })
 }
@@ -341,35 +311,31 @@ pub fn number_i32<'a>() -> Parser<'a, i32> {
 #[test]
 fn test_number_i32() {
     let parser = number_i32();
-    if let ParseResult::Success { value, location } = parser.parse(&mut ParserInput::text("1234"), 0) {
-        assert_eq!(value, 1234);
-        assert_eq!(location, 4);
-    } else {
-        assert!(false)
+    let (next_context, parse_result) = parser.parse(&mut ParserInput::text("1234"), &mut ParseContext::new_context(0));
+    match parse_result {
+        ParseResult::Success { value } => {
+            assert_eq!(value, 1234);
+            assert_eq!(next_context.location, 4);
+        },
+        _ => {
+            assert!(false)
+        }
     }
-
 }
 
 pub fn space<'a>() -> Parser<'a, ()> {
-    Parser::new(move |input: &mut ParserInput<'a>, location: usize| {
-        match input.read_by_size(location, 1) {
+    Parser::new(move |input, context| {
+        match input.read_by_size(context.location, 1) {
             Result::Ok(read) => match read[0] {
-                SPACE_CODE => ParseResult::Success {
-                    value: (),
-                    location: location + 1,
+                SPACE_CODE | TAB_CODE => {
+                    (context.move_location(1), ParseResult::successful(()))
                 },
-                TAB_CODE => ParseResult::Success {
-                    value: (),
-                    location: location + 1,
-                },
-                _ => ParseResult::Failure {
-                    message: format!("not format"),
-                    location,
+                _ => {
+                    (context.new_error("space", "not space"), ParseResult::failure())
                 },
             },
-            Result::Err(_error) => ParseResult::Failure {
-                message: format!("read failed"),
-                location,
+            Result::Err(_error) => {
+                (context.new_error("space", "read failed"), ParseResult::failure())
             },
         }
     })
@@ -378,21 +344,21 @@ pub fn space<'a>() -> Parser<'a, ()> {
 #[test]
 fn test_space() {
     let break_line_parser = space();
-    match break_line_parser.parse(&mut ParserInput::text("abc def"), 3) {
-        ParseResult::Success { value, location } => {
+    match break_line_parser.parse(&mut ParserInput::text("abc def"), &mut ParseContext::new_context(3)) {
+        (next_context, ParseResult::Success { value }) => {
             assert!(true);
-            assert_eq!(location, 4);
-        }
-        ParseResult::Failure { message, location } => {
+            assert_eq!(next_context.location, 4);
+        }, 
+        _ => {
             assert!(false);
         }
     }
-    match break_line_parser.parse(&mut ParserInput::text("abc\tdef"), 3) {
-        ParseResult::Success { value, location } => {
+    match break_line_parser.parse(&mut ParserInput::text("abc\tdef"), &mut ParseContext::new_context(3)) {
+        (next_context, ParseResult::Success { value }) => {
             assert!(true);
-            assert_eq!(location, 4);
+            assert_eq!(next_context.location, 4);
         }
-        ParseResult::Failure { message, location } => {
+        _ => {
             assert!(false);
         }
     }
@@ -409,15 +375,15 @@ pub fn space_or_line_seq<'a>() -> Parser<'a, ()> {
 #[test]
 fn test_space_or_line_seq() {
     let parser = literal("abc") + space_or_line_seq() + literal("def");
-    match parser.parse(&mut ParserInput::text("abc  \t \r\n\ndef"), 0) {
-        ParseResult::Success { value, location } => {
+    match parser.parse(&mut ParserInput::text("abc  \t \r\n\ndef"), &mut ParseContext::new_context(0)) {
+        (next_context, ParseResult::Success { value }) => {
             assert!(true);
-            assert_eq!(location, 13);
+            assert_eq!(next_context.location, 13);
             assert_eq!(value.0 .0, "abc");
             assert_eq!(value.0 .1, ());
             assert_eq!(value.1, "def");
         }
-        ParseResult::Failure { message, location } => {
+        _ => {
             assert!(false);
         }
     }
@@ -425,23 +391,22 @@ fn test_space_or_line_seq() {
 
 pub fn unit<'a>() -> Parser<'a, ()>
 where {
-    Parser::new(move |parser_input, location| ParseResult::Success {
-        value: (),
-        location,
+    Parser::new(move |input, context|  {
+        (context.move_location(0), ParseResult::successful(()))
     })
 }
 
 #[test]
 fn test_unit() {
     let parser = unit()
-        .flat_map(move |v| Parser::new(|input, location| ParseResult::successful("aaa", location)));
-    match parser.parse(&mut ParserInput::text("abc  \t \r\n\ndef"), 0) {
-        ParseResult::Success { value, location } => {
+        .flat_map(move |v| Parser::new(|input, context| (context.move_location(0), ParseResult::successful("aaa"))));
+    match parser.parse(&mut ParserInput::text("abc  \t \r\n\ndef"), &mut ParseContext::new_context(0)) {
+        (next_context, ParseResult::Success { value }) => {
             assert!(true);
-            assert_eq!(location, 0);
+            assert_eq!(next_context.location, 0);
             assert_eq!(value, "aaa");
         }
-        ParseResult::Failure { message, location } => {
+        _ => {
             assert!(false);
         }
     }

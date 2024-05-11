@@ -100,19 +100,31 @@ impl<'a, A> ParserMethods<'a> for Parser<'a, A> {
         Self::Output: Clone + 'a,
         B: Clone + 'a,
     {
-        Parser::new(move |input, context| match self.parse(input, context) {
-            (nextContext, ParseResult::Success { value }) => {
-                (nextContext, ParseResult::successful(Either::Left(value)))
-            }
-            (nextContext1, ParseResult::Failure {}) => match parser2.parse(input, context) {
-                (nextContext2, ParseResult::Success { value }) => {
-                    (nextContext2, ParseResult::successful(Either::Right(value)))
+        Parser::new(move |input, context| {
+            let mut context1;
+            let mut context2;
+
+            match self.parse(input, context) {
+            
+                (nextContext, ParseResult::Success { value }) => {
+                    (nextContext, ParseResult::successful(Either::Left(value)))
                 }
-                (nextContext2, ParseResult::Failure {}) => (
-                    context.new_error("either", "no valid parsers").add_error(&nextContext1).add_error(&nextContext2),
-                    ParseResult::failure()
-                ),
-            },
+                (nextContext1, ParseResult::Failure {}) => match parser2.parse(input, context) {
+                    (nextContext2, ParseResult::Success { value }) => {
+                        (nextContext2, ParseResult::successful(Either::Right(value)))
+                    }
+                    (nextContext2, ParseResult::Failure {}) => {
+                        context1 = nextContext1;
+                        context2 = nextContext2;
+                        (
+                            // TODO 
+                            // context.new_error("either", "no valid parsers").add_error(&nextContext1).add_error(&nextContext2),
+                            context.new_error("either", "no valid parsers"),
+                            ParseResult::failure()
+                        )
+                    },
+                },
+            }
         })
     }
 
@@ -141,8 +153,10 @@ impl<'a, A> ParserMethods<'a> for Parser<'a, A> {
                 }
                 (nextContext2, ParseResult::Failure {}) => 
                     (
-                        context.new_error("or", "no valid parsers").add_error(&nextContext1).add_error(&nextContext2)
-                        , ParseResult::failure(),
+                        // TODO
+                        // context.new_error("or", "no valid parsers").add_error(&nextContext1).add_error(&nextContext2)
+                        context.new_error("or", "no valid parsers"),
+                        ParseResult::failure(),
                     )
                     
             },
@@ -164,16 +178,18 @@ impl<'a, A> ParserMethods<'a> for Parser<'a, A> {
         Parser::new(move |input, context| {
             let mut vec = Vec::<Self::Output>::new();
             let mut cur_context = context;
+            let mut new_context;
             loop {
                 match self.parse(input, cur_context) {
                     (next_context, ParseResult::Success { value }) => {
                         vec.push(value);
-                        cur_context = &mut next_context.clone();
+                        new_context = next_context;
+                        cur_context = &mut new_context;
                     }
                     _ => break,
                 }
             }
-            (*cur_context,  ParseResult::successful(vec))
+            (cur_context.clone(),  ParseResult::successful(vec))
         })
     }
 
@@ -193,20 +209,21 @@ impl<'a, A> ParserMethods<'a> for Parser<'a, A> {
         Parser::new(move |input, context| {
             let mut vec = Vec::<Self::Output>::new();
             let mut cur_context = context;
-            let mut cur_context = context;
+            let mut new_context;
             loop {
                 match self.parse(input, cur_context) {
                     (next_context, ParseResult::Success { value }) => {
                         vec.push(value);
-                        cur_context = &mut next_context.clone();
+                        new_context = next_context;
+                        cur_context = &mut new_context;
                     }
                     _ => break,
                 }
             }
             if vec.len() > 0 {
-                (*cur_context,  ParseResult::successful(vec))
+                (cur_context.clone(),  ParseResult::successful(vec))
             } else {
-                (*cur_context,  ParseResult::failure())
+                (cur_context.clone(),  ParseResult::failure())
             }
         })
     }

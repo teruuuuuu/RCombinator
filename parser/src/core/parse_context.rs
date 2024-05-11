@@ -74,6 +74,15 @@ impl <'a>ParseContext<'a> {
             parse_error_opt: self.parse_error_opt.as_ref().map(|e| e.clone())
         }
     }
+
+    pub fn new_location(&mut self, location: usize) -> Self {
+        ParseContext {
+            label: self.label,
+            location,
+            parse_error_opt: self.parse_error_opt.as_ref().map(|e| e.clone())
+        }
+    }
+
 }
 
 impl <'a>std::fmt::Display for ParseContext<'a> {
