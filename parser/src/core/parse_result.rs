@@ -1,16 +1,16 @@
 #[derive(Clone, PartialEq, Debug)]
 pub enum ParseResult<A> {
-    Success { value: A, location: usize },
-    Failure { message: String, location: usize },
+    Success { value: A },
+    Failure { },
 }
 
 impl<A> ParseResult<A> {
-    pub fn successful(value: A, location: usize) -> Self {
-        ParseResult::Success { value, location }
+    pub fn successful(value: A) -> Self {
+        ParseResult::Success { value }
     }
 
-    pub fn failure(message: String, location: usize) -> Self {
-        ParseResult::Failure { message, location }
+    pub fn failure() -> Self {
+        ParseResult::Failure {  }
     }
 
     pub fn map<B, F>(self, f: F) -> ParseResult<B>
@@ -18,10 +18,11 @@ impl<A> ParseResult<A> {
         F: Fn(A) -> B,
     {
         match self {
-            ParseResult::Success { value, location } => ParseResult::successful(f(value), location),
-            ParseResult::Failure { message, location } => {
-                ParseResult::Failure { message, location }
+            ParseResult::Success { value } => ParseResult::successful(f(value)),
+            ParseResult::Failure {  } => {
+                ParseResult::Failure {}
             }
         }
     }
 }
+
