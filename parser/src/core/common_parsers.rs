@@ -40,7 +40,7 @@ where
                 current_context = &mut new_context;
             }
             ParseResult::Failure { } => {
-                return (next_contet, ParseResult::failure());
+                return (next_contet, ParseResult::successful(vec));
             }
         }
 
@@ -80,6 +80,9 @@ fn test_array() {
     let (next_context, r) = parser.parse(&mut ParserInput::text(",123,456,789,"), &mut ParseContext::new_context(0));
     println!("{:?}", r);
 
+    let parser = array(number_i32(), char('['), char(']'),char(','));
+    let (next_context, r) = parser.parse(&mut ParserInput::text("[]"), &mut ParseContext::new_context(0));
+    println!("{:?}", r);
 }
 
 pub fn break_line<'a>() -> Parser<'a, ()> {
