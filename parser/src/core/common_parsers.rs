@@ -117,7 +117,7 @@ fn test_break_line() {
 
 pub fn char<'a>(c: char) -> Parser<'a, char> {
     Parser::new(move |input, context| {
-        // 最大4バイト
+        // 最大4バイトを想定
         let mut tmp = [0u8; 4];
         let bytes = c.encode_utf8(&mut tmp).as_bytes();
         let len = bytes.len();
@@ -136,7 +136,7 @@ pub fn char<'a>(c: char) -> Parser<'a, char> {
 }
 
 #[test]
-fn test_char() {
+fn char_test() {
     let parser = char('a') + char('b');
 
     match parser.parse(&mut ParserInput::text("abcd"), &mut ParseContext::new_context(0)) {
@@ -169,6 +169,49 @@ fn test_char() {
     }
 }
 
+pub fn dquote_string<'a>() -> Parser<'a, String> {
+    let dquote_parser = char('"');
+    let dquote_stop_parser = stop_char('"');
+    
+    let escape_parser = escape().map(|v| v as u8);
+
+    dquote_parser.clone().
+        and_right(escape_parser.clone().or(dquote_stop_parser.clone()).seq0()).
+        and_left(dquote_parser.clone()).map(|v| String::from_utf8(v).unwrap())
+}
+
+#[test]
+pub fn dquote_string_test() {
+    let parser = dquote_string();
+    let mut parse_result = parser.parse(&mut ParserInput::text("\"abddef\""), &mut ParseContext::new_context(0));
+
+    match parse_result {
+        (next_context, ParseResult::Success { value }) => {
+            assert!(true);
+            assert_eq!(value, "abddef");
+            assert_eq!(next_context.location, 8);
+        }
+        _ => {
+            assert!(false);
+        }
+    }
+
+    parse_result = parser.parse(&mut ParserInput::text("\"ghi\\\"jkl\""), &mut ParseContext::new_context(0));
+    match parse_result {
+        (next_context, ParseResult::Success { value }) => {
+            assert!(true);
+            assert_eq!(value, "ghi\"jkl");
+            assert_eq!(next_context.location, 10);
+        }
+        _ => {
+            assert!(false);
+        }
+    }
+
+
+    
+}
+
 pub fn end<'a>() -> Parser<'a, ()> {
     Parser::new(move |input, context| {
         if input.has_more(context.location) {
@@ -179,6 +222,62 @@ pub fn end<'a>() -> Parser<'a, ()> {
         }
     })
 }
+
+pub fn escape<'a>() -> Parser<'a, char> {
+    Parser::new(move |input, context| {
+        let read_result = input.read_by_size(context.location, 2);
+        match input.read_by_size(context.location, 2) {
+            Result::Ok(read) => {
+                match read {
+                    [b'\\', b't'] => {
+                        (context.move_location(2), ParseResult::successful('\t'))
+                    }
+                    [b'\\', b'r'] => {
+                        (context.move_location(2), ParseResult::successful('\r'))
+                    }
+                    [b'\\', b'n'] => {
+                        (context.move_location(2), ParseResult::successful('\n'))
+                    }
+                    [b'\\', b'\\'] => {
+                        (context.move_location(2), ParseResult::successful('\\'))
+                    }
+                    [b'\\', b'"'] => {
+                        (context.move_location(2), ParseResult::successful('"'))
+                    }
+                    [b'\\', b'\''] => {
+                        (context.move_location(2), ParseResult::successful('\''))
+                    }
+                    _ => {
+                        (context.new_error("escape", "not escape"), ParseResult::failure())
+                    }
+                }
+            },
+            Result::Err(_) => {
+                (context.new_error("escape", "read error"), ParseResult::failure())
+            }
+        }
+    })
+}
+
+
+#[test]
+fn test_escape() {
+    let parser = char('a').seq0() + escape();
+    let parse_result = parser.parse(&mut ParserInput::text("aaa\\n"), &mut ParseContext::new_context(0));
+    println!("result*{:?}", parse_result);
+    match parse_result {
+        (next_context, ParseResult::Success { value }) => {
+            assert!(true);
+            assert_eq!(next_context.location, 5);
+            assert_eq!(value.0, vec!['a', 'a', 'a']);
+            assert_eq!(value.1, '\n');
+        }
+        _ => {
+            assert!(false);
+        }
+    }
+}
+
 
 pub fn head<'a>() -> Parser<'a, ()> {
     Parser::new(move |input, context| {
@@ -239,7 +338,7 @@ pub fn literal<'a>(v: &'a str) -> Parser<'a, &str> {
 }
 
 #[test]
-fn test_literal() {
+fn literal_test() {
     let parser = head() + literal("stuvwxyz.");
     match parser.parse(&mut ParserInput::text("abc\ndef\nstuvwxyz."), &mut ParseContext::new_context(8)) {
         (next_context, ParseResult::Success { value }) => {
@@ -323,6 +422,63 @@ fn test_number_i32() {
     }
 }
 
+pub fn number_i64<'a>() -> Parser<'a, i64> {
+    Parser::new(move |input, context| {
+        let mut sign = 1;
+        let mut number = 0 as i64;
+        let mut current_location = context.location;
+
+        let mut read;
+        match input.read_by_size(current_location, 1) {
+            Result::Ok(r) => {
+                read = r;
+            },
+            Result::Err(_) => {
+                return (context.new_error("number", "not number"), ParseResult::failure());
+            }
+        };
+        if read == [MINUS_CODE] {
+            sign = -1;
+            current_location = current_location + 1;
+        
+        } else if read == [PLUS_CODE] {
+            sign = 1;
+            current_location = current_location + 1;
+        }
+
+        match input.read_by_size(current_location, 1) {
+            Result::Ok(r) => {
+                read = r;
+            },
+            Result::Err(_) => {
+                return (context.new_error("number", "not number"), ParseResult::failure());
+            }
+        };
+        if read[0] >= ZERO_CODE && read[0] <= NINE_CODE {
+
+            loop {
+                if read[0] >= ZERO_CODE && read[0] <= NINE_CODE {
+                    number = number * 10 + (read[0] - ZERO_CODE) as i64;
+                    current_location += 1;
+                    match input.read_by_size(current_location, 1) {
+                        Result::Ok(r) => {
+                            read = r;
+                        },
+                        Result::Err(_) => {
+                            break;
+                        }
+                    }
+                } else {
+                    break;
+                }
+            }
+            (context.new_location(current_location), ParseResult::successful(sign * number))
+        } else {
+            (context.new_error("number", "not number"), ParseResult::failure())
+        }
+    })
+}
+
 pub fn space<'a>() -> Parser<'a, ()> {
     Parser::new(move |input, context| {
         match input.read_by_size(context.location, 1) {
@@ -342,7 +498,7 @@ pub fn space<'a>() -> Parser<'a, ()> {
 }
 
 #[test]
-fn test_space() {
+fn space_test() {
     let break_line_parser = space();
     match break_line_parser.parse(&mut ParserInput::text("abc def"), &mut ParseContext::new_context(3)) {
         (next_context, ParseResult::Success { value }) => {
@@ -362,6 +518,45 @@ fn test_space() {
             assert!(false);
         }
     }
+}
+
+pub fn stop_char<'a>(c: char) -> Parser<'a, u8> {
+    Parser::new(move |input, context| {
+        // 最大4バイトを想定
+        let mut tmp = [0u8; 4];
+        let bytes = c.encode_utf8(&mut tmp).as_bytes();
+        let len = bytes.len();
+
+        // TODO StopWordがマルチバイトで残りバイト数1の場合の対応
+        match input.read_by_size(context.location, len) {
+            Result::Ok(txt) => {
+                if txt == bytes {
+                    (context.new_error("stop_char", "match input"), ParseResult::failure())
+                } else {
+                    (context.move_location(1), ParseResult::successful(txt[0]))
+                }
+            }
+            Result::Err(_) => (context.new_error("char", "read error"), ParseResult::failure())
+        }
+    })
+}
+
+#[test]
+pub fn stop_char_test() {
+    let parser = stop_char('"').seq0().map(|v| String::from_utf8(v));
+    let parse_result = parser.parse(&mut ParserInput::text("\"abc def\""), &mut ParseContext::new_context(1));
+
+    match parse_result {
+        (next_context, ParseResult::Success { value }) => {
+            assert!(true);
+            assert_eq!(value, Result::Ok("abc def".to_owned()));
+            assert_eq!(next_context.location, 8);
+        }
+        _ => {
+            assert!(false);
+        }
+    }
+
 }
 
 pub fn space_or_line<'a>() -> Parser<'a, ()> {

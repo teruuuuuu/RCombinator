@@ -12,3 +12,7 @@ dependencies = [
 [[package]]
 name = "rcomb-parser"
 version = "0.1.0"
+
+[[package]]
+name = "rcomb-work"
+version = "0.1.0"
