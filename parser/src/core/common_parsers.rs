@@ -1,3 +1,5 @@
+use std::io::Read;
+
 use crate::core::parse_result;
 use crate::core::parse_result::*;
 use crate::core::parser::*;
@@ -14,6 +16,7 @@ const ZERO_CODE: u8 = b'0';
 const NINE_CODE: u8 = b'9';
 const MINUS_CODE: u8 = b'-';
 const PLUS_CODE: u8 = b'+';
+const DOT_CODE: u8 = b'.';
 
 pub fn array<'a, A, B, C, D>(
     parser: Parser<'a, A>,
@@ -480,6 +483,104 @@ pub fn number_i64<'a>() -> Parser<'a, i64> {
             (context.new_error("number", "not number"), ParseResult::failure())
         }
     })
+}
+
+pub fn number_f64<'a>() -> Parser<'a, f64> {
+    Parser::new(move |input, context| {
+        let mut current_location = context.location;
+        let mut hava_sign = false;
+        let mut hava_float = false;
+
+        match input.read_by_size(current_location, 1) {
+            Result::Ok(r) => {
+                if r[0] == MINUS_CODE || r[0] == PLUS_CODE {
+                    current_location = current_location + 1;
+                    hava_sign = true;
+                
+                }
+            },
+            Result::Err(_) => {
+                return (context.new_error("number", "not number"), ParseResult::failure());
+            }
+        };
+
+        loop {
+            match input.read_by_size(current_location, 1) {
+                Result::Ok(r) => {
+                    if r[0] >= ZERO_CODE && r[0] <= NINE_CODE {
+                        current_location = current_location + 1;
+                    
+                    } else {
+                        break;
+                    }
+                },
+                Result::Err(_) => {
+                    break;
+                }
+            }
+        }
+
+        if current_location == context.location || (hava_sign && current_location == context.location + 1) {
+            // 数値なし
+            return (context.new_error("number", "not number"), ParseResult::failure());
+        }
+
+        match input.read_by_size(current_location, 1) {
+            Result::Ok(r) => {
+                if r[0] == DOT_CODE {
+                    // 少数あり
+                    current_location = current_location + 1;
+                    hava_float = true;
+                }
+            },
+            Result::Err(_) => {}
+        };
+
+        if hava_float {
+            // 少数あり
+            loop {
+                match input.read_by_size(current_location, 1) {
+                    Result::Ok(r) => {
+                        if r[0] >= ZERO_CODE && r[0] <= NINE_CODE {
+                            current_location = current_location + 1;
+                        
+                        } else {
+                            break;
+                        }
+                    },
+                    Result::Err(_) => {
+                        break;
+                    }
+                }
+            }
+            
+        }
+        match input.read_by_size(context.location, current_location - context.location) {
+            Result::Ok(r) => {
+                return (context.new_location(current_location), ParseResult::successful(std::str::from_utf8(r).unwrap().parse::<f64>().unwrap()));
+            },
+            Result::Err(_) => {
+                return (context.new_error("number", "read by size error"), ParseResult::failure());
+            }
+        }
+    })
+}
+
+#[test]
+pub fn number_f64_test() {
+    let parser = number_f64();
+
+    match parser.parse(&mut ParserInput::text("-1234.567890000001"), &mut ParseContext::new_context(0)) {
+        (next_context, ParseResult::Success { value }) => {
+            assert!(true);
+            assert_eq!(value, -1234.567890000001);
+            assert_eq!(next_context.location, 18);
+        }, 
+        _ => {
+            assert!(false);
+        }
+    }
+    
 }
 
 pub fn space<'a>() -> Parser<'a, ()> {
