@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "parser"
+    , "parser2"
     , "example"
     , "work"
 ]

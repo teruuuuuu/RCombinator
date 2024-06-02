@@ -16,3 +16,7 @@ version = "0.1.0"
 [[package]]
 name = "rcomb-work"
 version = "0.1.0"
+
+[[package]]
+name = "rcomb2-parser"
+version = "0.1.0"

@@ -1,5 +1,3 @@
-use crate::core::parser_methods::ParserMethods;
-
 #[derive(Debug, Clone)]
 pub struct ParseError<'a> {
     pub location: usize,
@@ -63,6 +61,7 @@ impl <'a>std::fmt::Display for ParseError<'a> {
 
 #[test]
 fn test() {
+    use crate::core::parser_methods::ParserMethods;
     use crate::core::common_parsers;
     use crate::core::parse_context::ParseContext;
     use crate::core::parser_input::ParserInput;

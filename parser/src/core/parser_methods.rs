@@ -1,13 +1,10 @@
-use crate::core::common_parsers::{literal, space_or_line_seq};
+use crate::core::common_parsers::space_or_line_seq;
 use crate::core::either::Either;
 use crate::core::parser::Parser;
 
-use super::common_parsers::{self, end};
-use super::parse_context::ParseContext;
 use super::parse_result::ParseResult;
 use super::parser::ParserMonad;
 use super::parser::{ParserFunctuor, ParserTrait};
-use super::parser_input::ParserInput;
 
 pub trait ParserMethods<'a>: ParserTrait<'a> {
     fn and<B>(self, parser2: Parser<'a, B>) -> Self::ParserNext<'a, (Self::Output, B)>
@@ -252,10 +249,15 @@ impl<'a, A> ParserMethods<'a> for Parser<'a, A> {
 
 #[test]
 fn test_skip_space() {
+    use super::common_parsers;
+    use super::parse_context::ParseContext;
+    use super::parser_input::ParserInput;
+
+    
     let parser = common_parsers::char('a')
         .seq0()
         .with_skip_space()
-        .skip_right(end());
+        .skip_right(common_parsers::end());
     match parser.parse(&mut ParserInput::text(" \t\n \r\naaa"), &mut ParseContext::new_context(0)) {
         (next_context, ParseResult::Success { value }) => {
             assert!(true);
