@@ -49,15 +49,15 @@ pub trait ParserMethods<'a>: ParserTrait<'a> {
     // where
     //     Self::Output: Clone + 'a;
 
-    fn skip_left<B>(self, parser2: Parser<'a, B>) -> Self::ParserNext<'a, B>
-    where
-        Self::Output: Clone + 'a,
-        B: Clone + 'a;
+    // fn skip_left<B>(self, parser2: Parser<'a, B>) -> Self::ParserNext<'a, B>
+    // where
+    //     Self::Output: Clone + 'a,
+    //     B: Clone + 'a;
 
-    fn skip_right<B>(self, parser2: Parser<'a, B>) -> Self::ParserNext<'a, Self::Output>
-    where
-        Self::Output: Clone + 'a,
-        B: Clone + 'a;
+    // fn skip_right<B>(self, parser2: Parser<'a, B>) -> Self::ParserNext<'a, Self::Output>
+    // where
+    //     Self::Output: Clone + 'a,
+    //     B: Clone + 'a;
 
     // fn with_skip_space(self) -> Self::ParserNext<'a, Self::Output>
     // where
@@ -70,6 +70,7 @@ impl<'a, A> ParserMethods<'a> for Parser<'a, A> {
         A: Clone + 'a,
         B: Clone + 'a,
     {
+        // パフォーマンス改善のためできるだけflat_mapは使わないようにする
         // self.flat_map(move |value_a| {
         //     parser2
         //         .clone()
@@ -94,9 +95,6 @@ impl<'a, A> ParserMethods<'a> for Parser<'a, A> {
                     (error_context, ParseResult::failure(ParseError::new(parse_error.location, "and".to_string(), parse_error.message), location))
                 }
             }
-
-
-            // (context, ParseResult::failure(ParseError::new(location, "and".to_string(), "message".to_string()), location))
         })
     }
 
@@ -238,21 +236,21 @@ impl<'a, A> ParserMethods<'a> for Parser<'a, A> {
     //     })
     // }
 
-    fn skip_left<B>(self, parser2: Parser<'a, B>) -> Self::ParserNext<'a, B>
-    where
-        Self::Output: Clone + 'a,
-        B: Clone + 'a,
-    {
-        self.and(parser2).map(|v| v.1)
-    }
+    // fn skip_left<B>(self, parser2: Parser<'a, B>) -> Self::ParserNext<'a, B>
+    // where
+    //     Self::Output: Clone + 'a,
+    //     B: Clone + 'a,
+    // {
+    //     self.and(parser2).map(|v| v.1)
+    // }
 
-    fn skip_right<B>(self, parser2: Parser<'a, B>) -> Self::ParserNext<'a, Self::Output>
-    where
-        Self::Output: Clone + 'a,
-        B: Clone + 'a,
-    {
-        self.and(parser2).map(|v| v.0)
-    }
+    // fn skip_right<B>(self, parser2: Parser<'a, B>) -> Self::ParserNext<'a, Self::Output>
+    // where
+    //     Self::Output: Clone + 'a,
+    //     B: Clone + 'a,
+    // {
+    //     self.and(parser2).map(|v| v.0)
+    // }
 
     // fn with_skip_space(self) -> Self::ParserNext<'a, Self::Output>
     // where

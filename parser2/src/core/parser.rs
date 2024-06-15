@@ -92,7 +92,6 @@ impl<'a, A> ParserMonad<'a> for Parser<'a, A> {
             move |context, input, location| match self.parse(context, input, location) {
                 (next_context, ParseResult::Success { value, location}) 
                     => {
-                        println!("location: {}", location);
                         f(value).parse(next_context, input, location)
                     },
                 (error_context, ParseResult::Failure { parse_error, location}) 
