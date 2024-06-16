@@ -1,17 +1,23 @@
-use crate::core::parse_result;
 use crate::core::parse_result::*;
 use crate::core::parser::*;
-use crate::core::parser_input::ParserInput;
 use crate::core::parser_methods::ParserMethods;
+use crate::prelude::parse_error::ParseError;
 
 const CR_CODE: u8 = 13;
+
+const CR_CHAR: char = '\u{d}';
 const LF_CODE: u8 = 10;
+const LF_CHAR: char = '\u{a}';
 const SPACE_CODE: u8 = b' ';
+const SPACE_CHAR: char = '\u{20}';
 const TAB_CODE: u8 = b'\t';
+const TAB_CHAR: char = '\u{9}';
 const ZERO_CODE: u8 = b'0';
 const NINE_CODE: u8 = b'9';
 const MINUS_CODE: u8 = b'-';
+const MINUS_CHAR: char = '-';
 const PLUS_CODE: u8 = b'+';
+const PLUS_CHAR: char = '+';
 
 pub fn array<'a, A, B, C, D>(
     parser: Parser<'a, A>,
@@ -57,48 +63,45 @@ where
 #[test]
 fn test_array() {
     let parser = array(number_i32().with_skip_space(), char('[').with_skip_space(), char(']').with_skip_space(),char(',').with_skip_space());
-    let r = parser.parse(&mut ParserInput::text("[ 123 , 456 , 789 ]"), 0);
+    let r = parser.parse("[ 123 , 456 , 789 ]", 0);
     println!("{:?}", r);
 
     let parser = array(number_i32(), char(','), char(','),char(','));
-    let r = parser.parse(&mut ParserInput::text(",123,456,789,"), 0);
+    let r = parser.parse(",123,456,789,", 0);
     println!("{:?}", r);
 
 }
 
 pub fn break_line<'a>() -> Parser<'a, ()> {
-    Parser::new(move |input: &mut ParserInput<'a>, location: usize| {
-        match input.read_by_size(location, 1) {
-            Result::Ok(read1) => match read1[0] {
-                CR_CODE => match input.read_by_size(location + 1, 1) {
-                    Result::Ok(read2) => match read2[0] {
-                        LF_CODE => ParseResult::Success {
-                            value: (),
-                            location: location + 2,
-                        },
-                        _ => ParseResult::Success {
-                            value: (),
-                            location: location + 1,
-                        },
-                    },
-                    _ => ParseResult::Success {
-                        value: (),
-                        location: location + 1,
-                    },
-                },
-                LF_CODE => ParseResult::Success {
+    Parser::new(move |input, location| {
+        if input[location..].starts_with(CR_CHAR) {
+            if input[location+1..].starts_with(LF_CHAR) {
+                ParseResult::Success {
+                    value: (),
+                    location: location + 2,
+                }
+            } else {
+                ParseResult::Success {
                     value: (),
                     location: location + 1,
-                },
-                _ => ParseResult::Failure {
-                    message: format!("read failed"),
+                }
+            }
+        } else if input[location..].starts_with(LF_CHAR) {
+            ParseResult::Success {
+                value: (),
+                location: location + 1,
+            }
+        } else {
+            ParseResult::Failure {
+                parse_error: ParseError::new(
+                    "break_line".to_string(),
+                    "not break line".to_string(),
                     location,
-                },
-            },
-            Result::Err(_error) => ParseResult::Failure {
-                message: format!("read failed"),
-                location,
-            },
+                    vec![]
+
+                ),
+                location: location
+            }
         }
     })
 }
@@ -106,42 +109,33 @@ pub fn break_line<'a>() -> Parser<'a, ()> {
 #[test]
 fn test_break_line() {
     let break_line_parser = break_line();
-    match break_line_parser.parse(&mut ParserInput::text("abc\ndef"), 3) {
+    match break_line_parser.parse("abc\ndef", 3) {
         ParseResult::Success { value, location } => {
             assert!(true);
             assert_eq!(location, 4);
         }
-        ParseResult::Failure { message, location } => {
+        ParseResult::Failure { parse_error, location } => {
             assert!(false);
         }
     }
 }
 
 pub fn char<'a>(c: char) -> Parser<'a, char> {
-    Parser::new(move |input: &mut ParserInput<'a>, location: usize| {
-        // 最大4バイト
-        let mut tmp = [0u8; 4];
-        let bytes = c.encode_utf8(&mut tmp).as_bytes();
-        let len = bytes.len();
+    Parser::new(move |input, location| {
+        let check = input.chars().nth(location).map(|f| f == c);
 
-        match input.read_by_size(location, len) {
-            Result::Ok(txt) => {
-                if txt == bytes {
-                    ParseResult::Success {
-                        value: c,
-                        location: location + len,
-                    }
-                } else {
-                    ParseResult::Failure {
-                        message: format!("not match "),
-                        location,
-                    }
-                }
-            }
-            Result::Err(err) => ParseResult::Failure {
-                message: format!("not match "),
+        if check.unwrap_or(false) {
+            ParseResult::Success { value: c, location: location + 1}
+        } else {
+            ParseResult::Failure {
+                parse_error: ParseError {
+                    label: "char".to_string(),
+                    message: "not match".to_string(),
+                    location,
+                    children: vec![]
+                },
                 location,
-            },
+            }
         }
     })
 }
@@ -149,8 +143,7 @@ pub fn char<'a>(c: char) -> Parser<'a, char> {
 #[test]
 fn test_char() {
     let parser = char('a') + char('b');
-
-    match parser.parse(&mut ParserInput::text("abcd"), 0) {
+    match parser.parse("abcd", 0) {
         ParseResult::Success { value, location } => {
             assert!(true);
             assert_eq!(('a', 'b'), value);
@@ -160,7 +153,7 @@ fn test_char() {
     }
 
     let parser = char('a').seq1() + end();
-    match parser.parse(&mut ParserInput::text("aaaa"), 0) {
+    match parser.parse("aaaa", 0) {
         ParseResult::Success { value, location } => {
             assert!(true);
             assert_eq!((vec!['a', 'a', 'a', 'a'], ()), value);
@@ -170,30 +163,27 @@ fn test_char() {
     }
 
     let parser = (char('🍣') | char('🍺')).seq0() + end();
-    match parser.parse(&mut ParserInput::text("🍣🍣🍺🍺🍣🍺🍺"), 0) {
+    match parser.parse("🍣🍣🍺🍺🍣🍺🍺", 0) {
         ParseResult::Success { value, location } => {
             assert!(true);
             assert_eq!((vec!['🍣', '🍣', '🍺', '🍺', '🍣', '🍺', '🍺'], ()), value);
-            assert_eq!(28, location);
+            assert_eq!(7, location);
         }
         _ => assert!(false),
     }
+
 }
 
 pub fn end<'a>() -> Parser<'a, ()> {
-    Parser::new(move |input: &mut ParserInput<'a>, location: usize| {
-        if input.has_more(location) {
-            ParseResult::Failure {
-                message: format!(
-                    "not end current location{:?}, substring{:?}",
-                    location,
-                    input.read_line(location)
-                ),
+    Parser::new(move |input, location| {
+        if input.chars().nth(location).is_none() {
+            ParseResult::Success {
+                value: (),
                 location,
             }
         } else {
-            ParseResult::Success {
-                value: (),
+            ParseResult::Failure {
+                parse_error: ParseError::new("end".to_string(), "not end".to_string(), location, vec![]),
                 location,
             }
         }
@@ -201,31 +191,20 @@ pub fn end<'a>() -> Parser<'a, ()> {
 }
 
 pub fn head<'a>() -> Parser<'a, ()> {
-    Parser::new(move |input: &mut ParserInput<'a>, location: usize| {
+    Parser::new(move |input, location| {
         if location == 0 {
             ParseResult::Success {
                 value: (),
                 location,
             }
         } else {
-            match input.read_by_size(location - 1, 2) {
-                Result::Ok(bytes) => {
-                    if bytes[0] == CR_CODE || bytes[0] == LF_CODE {
-                        ParseResult::Success {
-                            value: (),
-                            location,
-                        }
-                    } else {
-                        ParseResult::Failure {
-                            message: format!("not head"),
-                            location,
-                        }
-                    }
-                }
-                Result::Err(_err) => ParseResult::Failure {
-                    message: format!("read failed"),
+            if location > 1 && input[location-1..].starts_with(LF_CHAR) {
+                ParseResult::Success {
+                    value: (),
                     location,
-                },
+                }
+            } else {
+                ParseResult::failure(ParseError::new("head".to_string(), "not head".to_string(), location, vec![]), location)
             }
         }
     })
@@ -245,28 +224,17 @@ fn lazy_test() {
 }
 
 pub fn literal<'a>(v: &'a str) -> Parser<'a, &str> {
-    Parser::new(move |input: &mut ParserInput<'a>, location: usize| {
+    Parser::new(move |input, location| {
         let bytes = v.as_bytes();
         let len = bytes.len();
 
-        match input.read_by_size(location, len) {
-            Result::Ok(reads) => {
-                if reads == bytes {
-                    ParseResult::Success {
-                        value: v,
-                        location: location + len,
-                    }
-                } else {
-                    ParseResult::Failure {
-                        message: format!("text not equal."),
-                        location,
-                    }
-                }
+        if input[location..].starts_with(v) {
+            ParseResult::Success {
+                value: v,
+                location: location + len,
             }
-            Result::Err(_err) => ParseResult::Failure {
-                message: format!("read error location[{}] len[{}]", location, len),
-                location,
-            },
+        } else {
+            ParseResult::failure(ParseError::new("literal".to_string(), "not match".to_string(), location, vec![]), location)
         }
     })
 }
@@ -274,7 +242,7 @@ pub fn literal<'a>(v: &'a str) -> Parser<'a, &str> {
 #[test]
 fn test_literal() {
     let parser = head() + literal("stuvwxyz.");
-    match parser.parse(&mut ParserInput::text("abc\ndef\nstuvwxyz."), 8) {
+    match parser.parse("abc\ndef\nstuvwxyz.", 8) {
         ParseResult::Success { value, location } => {
             assert!(true);
             assert_eq!(((), "stuvwxyz."), value);
@@ -288,64 +256,47 @@ pub fn number_i32<'a>() -> Parser<'a, i32> {
     Parser::new(move |input, location| {
         let mut sign = 1;
         let mut number = 0;
-        let mut current_location = location;
+        let mut current_location = 0;
 
-        let mut read;
-        match input.read_by_size(current_location, 1) {
-            Result::Ok(r) => {
-                read = r;
-            },
-            Result::Err(_) => {
-                return ParseResult::failure("not number".to_owned(), current_location);
-            }
-        };
-        if read == [MINUS_CODE] {
+        let from_location_bytes = input[location..].as_bytes();
+        let from_location_len = from_location_bytes.len();
+        if from_location_len <= current_location {
+            return ParseResult::failure(
+                ParseError::new("number".to_string(), "not number".to_string(), location, vec![]),
+                current_location);
+        }
+
+        if from_location_bytes[current_location] == MINUS_CODE {
             sign = -1;
-            current_location = current_location + 1;
-        
-        } else if read == [PLUS_CODE] {
+            current_location += 1;
+        } else if from_location_bytes[current_location] == PLUS_CODE {
             sign = 1;
-            current_location = current_location + 1;
+            current_location += 1;
         }
 
-        match input.read_by_size(current_location, 1) {
-            Result::Ok(r) => {
-                read = r;
-            },
-            Result::Err(_) => {
-                return ParseResult::failure("not number".to_owned(), current_location);
-            }
-        };
-        if read[0] >= ZERO_CODE && read[0] <= NINE_CODE {
-
-            loop {
-                if read[0] >= ZERO_CODE && read[0] <= NINE_CODE {
-                    number = number * 10 + (read[0] - ZERO_CODE) as i32;
-                    current_location += 1;
-                    match input.read_by_size(current_location, 1) {
-                        Result::Ok(r) => {
-                            read = r;
-                        },
-                        Result::Err(_) => {
-                            break;
-                        }
-                    }
-                } else {
-                    break;
-                }
-            }
-
-            ParseResult::successful(sign * number, current_location)
-        } else {
-            ParseResult::failure("not number".to_owned(), current_location)
+        if from_location_len < current_location ||
+                (from_location_bytes[current_location] < ZERO_CODE || from_location_bytes[current_location] > NINE_CODE) {
+            return ParseResult::failure(
+                ParseError::new("number".to_string(), "not number".to_string(), location, vec![]),
+                current_location);
         }
+        loop {
+            if from_location_len <= current_location ||
+                (from_location_bytes[current_location] < ZERO_CODE || from_location_bytes[current_location] > NINE_CODE) {
+                break
+            } else {
+                number = number * 10 + ((from_location_bytes[current_location] - ZERO_CODE) as i32);
+                current_location += 1;
+            }
+        }
+        ParseResult::successful(sign * number, location + current_location)
     })
 }
 
 #[test]
 fn test_number_i32() {
     let parser = number_i32();
-    if let ParseResult::Success { value, location } = parser.parse(&mut ParserInput::text("1234"), 0) {
+    if let ParseResult::Success { value, location } = parser.parse("1234", 0) {
         assert_eq!(value, 1234);
         assert_eq!(location, 4);
     } else {
@@ -355,26 +306,19 @@ fn test_number_i32() {
 }
 
 pub fn space<'a>() -> Parser<'a, ()> {
-    Parser::new(move |input: &mut ParserInput<'a>, location: usize| {
-        match input.read_by_size(location, 1) {
-            Result::Ok(read) => match read[0] {
-                SPACE_CODE => ParseResult::Success {
-                    value: (),
-                    location: location + 1,
-                },
-                TAB_CODE => ParseResult::Success {
-                    value: (),
-                    location: location + 1,
-                },
-                _ => ParseResult::Failure {
-                    message: format!("not format"),
-                    location,
-                },
-            },
-            Result::Err(_error) => ParseResult::Failure {
-                message: format!("read failed"),
-                location,
-            },
+    Parser::new(move |input, location| {
+        if input[location..].starts_with(SPACE_CHAR) {
+            ParseResult::Success {
+                value: (),
+                location: location + 1,
+            }
+        } else if input[location..].starts_with(TAB_CHAR) {
+            ParseResult::Success {
+                value: (),
+                location: location + 1,
+            }
+        } else {
+            ParseResult::failure(ParseError::new("space".to_string(), "not space".to_string(), location, vec![]), location)
         }
     })
 }
@@ -382,21 +326,21 @@ pub fn space<'a>() -> Parser<'a, ()> {
 #[test]
 fn test_space() {
     let break_line_parser = space();
-    match break_line_parser.parse(&mut ParserInput::text("abc def"), 3) {
+    match break_line_parser.parse("abc def", 3) {
         ParseResult::Success { value, location } => {
             assert!(true);
             assert_eq!(location, 4);
         }
-        ParseResult::Failure { message, location } => {
+        ParseResult::Failure { parse_error, location } => {
             assert!(false);
         }
     }
-    match break_line_parser.parse(&mut ParserInput::text("abc\tdef"), 3) {
+    match break_line_parser.parse("abc\tdef", 3) {
         ParseResult::Success { value, location } => {
             assert!(true);
             assert_eq!(location, 4);
         }
-        ParseResult::Failure { message, location } => {
+        ParseResult::Failure { parse_error, location } => {
             assert!(false);
         }
     }
@@ -413,7 +357,7 @@ pub fn space_or_line_seq<'a>() -> Parser<'a, ()> {
 #[test]
 fn test_space_or_line_seq() {
     let parser = literal("abc") + space_or_line_seq() + literal("def");
-    match parser.parse(&mut ParserInput::text("abc  \t \r\n\ndef"), 0) {
+    match parser.parse("abc  \t \r\n\ndef", 0) {
         ParseResult::Success { value, location } => {
             assert!(true);
             assert_eq!(location, 13);
@@ -421,7 +365,7 @@ fn test_space_or_line_seq() {
             assert_eq!(value.0 .1, ());
             assert_eq!(value.1, "def");
         }
-        ParseResult::Failure { message, location } => {
+        ParseResult::Failure { parse_error, location } => {
             assert!(false);
         }
     }
@@ -439,13 +383,13 @@ where {
 fn test_unit() {
     let parser = unit()
         .flat_map(move |v| Parser::new(|input, location| ParseResult::successful("aaa", location)));
-    match parser.parse(&mut ParserInput::text("abc  \t \r\n\ndef"), 0) {
+    match parser.parse("abc  \t \r\n\ndef", 0) {
         ParseResult::Success { value, location } => {
             assert!(true);
             assert_eq!(location, 0);
             assert_eq!(value, "aaa");
         }
-        ParseResult::Failure { message, location } => {
+        ParseResult::Failure { parse_error, location } => {
             assert!(false);
         }
     }

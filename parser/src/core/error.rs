@@ -1,6 +1,5 @@
 use std::fmt;
 
-
 #[derive(Debug, Clone)]
 pub enum MyError {   
     IO(String),

@@ -1,7 +1,7 @@
+use std::ops::Add;
+
 use crate::core::parser::Parser;
 use crate::core::parser_methods::ParserMethods;
-
-use std::ops::Add;
 
 impl<'a, A, B> Add<Parser<'a, B>> for Parser<'a, A>
 where

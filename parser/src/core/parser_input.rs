@@ -1,5 +1,4 @@
-use std::error::Error;
-use std::fs::{File, FileType};
+use std::fs::File;
 use std::io::{BufReader, Read, Seek, SeekFrom};
 use std::sync::Mutex;
 

@@ -1,12 +1,12 @@
-use crate::core::common_parsers::{literal, space_or_line_seq};
+use crate::core::common_parsers::space_or_line_seq;
 use crate::core::either::Either;
+use crate::core::parse_error::ParseError;
 use crate::core::parser::Parser;
 
 use super::common_parsers::{self, end};
 use super::parse_result::ParseResult;
+use super::parser::{ParserFunctor, ParserTrait};
 use super::parser::ParserMonad;
-use super::parser::{ParserFunctuor, ParserTrait};
-use super::parser_input::ParserInput;
 
 pub trait ParserMethods<'a>: ParserTrait<'a> {
     fn and<B>(self, parser2: Parser<'a, B>) -> Self::ParserNext<'a, (Self::Output, B)>
@@ -104,16 +104,25 @@ impl<'a, A> ParserMethods<'a> for Parser<'a, A> {
                 ParseResult::successful(Either::Left(value), location)
             }
             ParseResult::Failure {
-                message: message1,
-                location,
+                parse_error: parse_error_1,
+                location: location_1,
             } => match parser2.parse(input, location) {
                 ParseResult::Success { value, location } => {
                     ParseResult::successful(Either::Right(value), location)
                 }
                 ParseResult::Failure {
-                    message: message2,
-                    location,
-                } => ParseResult::failure(format!("{},{}", message1, message2), location),
+                    parse_error: parse_error_2,
+                    location: location_2,
+                } =>
+                    ParseResult::failure(
+                        ParseError::new(
+                            "either".to_string(),
+                            "not valid parser".to_string(),
+                            location,
+                            vec![parse_error_1, parse_error_2]
+                        ),
+                        location
+                    )
             },
         })
     }
@@ -124,7 +133,7 @@ impl<'a, A> ParserMethods<'a> for Parser<'a, A> {
     {
         Parser::new(move |input, location| match self.parse(input, location) {
             ParseResult::Success { value, location } => ParseResult::successful(Option::Some(value), location),
-            ParseResult::Failure { message,location} => ParseResult::successful(Option::None, location)
+            ParseResult::Failure { parse_error,location} => ParseResult::successful(Option::None, location)
         })
     }
 
@@ -135,16 +144,25 @@ impl<'a, A> ParserMethods<'a> for Parser<'a, A> {
         Parser::new(move |input, location| match self.parse(input, location) {
             ParseResult::Success { value, location } => ParseResult::successful(value, location),
             ParseResult::Failure {
-                message: message1,
+                parse_error: parse_error_1,
                 location,
             } => match parser2.parse(input, location) {
                 ParseResult::Success { value, location } => {
                     ParseResult::successful(value, location)
                 }
                 ParseResult::Failure {
-                    message: message2,
+                    parse_error: parse_error_2,
                     location,
-                } => ParseResult::failure(format!("{},{}", message1, message2), location),
+                } =>
+                    ParseResult::failure(
+                        ParseError::new(
+                            "or".to_string(),
+                            "not valid parser".to_string(),
+                            location,
+                            vec![parse_error_1, parse_error_2]
+                        ),
+                        location
+                    )
             },
         })
     }
@@ -193,22 +211,31 @@ impl<'a, A> ParserMethods<'a> for Parser<'a, A> {
         Parser::new(move |input, location| {
             let mut vec = Vec::<Self::Output>::new();
             let mut cur_location = location;
+            let mut parse_errors = Vec::new();
             loop {
                 match self.parse(input, cur_location) {
                     ParseResult::Success { value, location } => {
                         vec.push(value);
                         cur_location = location;
                     }
-                    _ => break,
+                    ParseResult::Failure { parse_error, location} => {
+                        parse_errors.push(parse_error);
+                        break
+                    }
                 }
             }
             if vec.len() > 0 {
                 ParseResult::successful(vec, cur_location)
             } else {
-                ParseResult::Failure {
-                    message: "not matched".to_owned(),
-                    location,
-                }
+                ParseResult::failure(
+                    ParseError::new(
+                        "seq1".to_string(),
+                        "not valid parser".to_string(),
+                        location,
+                        parse_errors
+                    ),
+                    location
+                )
             }
         })
     }
@@ -243,13 +270,13 @@ fn test_skip_space() {
         .seq0()
         .with_skip_space()
         .skip_right(end());
-    match parser.parse(&mut ParserInput::text(" \t\n \r\naaa"), 0) {
+    match parser.parse(" \t\n \r\naaa", 0) {
         ParseResult::Success { value, location } => {
             assert!(true);
             assert_eq!(location, 9);
             assert_eq!(value, vec!['a', 'a', 'a']);
         }
-        ParseResult::Failure { message, location } => {
+        ParseResult::Failure { parse_error, location } => {
             assert!(false);
         }
     }

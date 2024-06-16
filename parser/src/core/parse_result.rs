@@ -1,7 +1,9 @@
+use crate::core::parse_error::ParseError;
+
 #[derive(Clone, PartialEq, Debug)]
 pub enum ParseResult<A> {
     Success { value: A, location: usize },
-    Failure { message: String, location: usize },
+    Failure { parse_error: ParseError, location: usize },
 }
 
 impl<A> ParseResult<A> {
@@ -9,8 +11,8 @@ impl<A> ParseResult<A> {
         ParseResult::Success { value, location }
     }
 
-    pub fn failure(message: String, location: usize) -> Self {
-        ParseResult::Failure { message, location }
+    pub fn failure(parse_error: ParseError, location: usize) -> Self {
+        ParseResult::Failure { parse_error, location }
     }
 
     pub fn map<B, F>(self, f: F) -> ParseResult<B>
@@ -18,9 +20,10 @@ impl<A> ParseResult<A> {
         F: Fn(A) -> B,
     {
         match self {
-            ParseResult::Success { value, location } => ParseResult::successful(f(value), location),
-            ParseResult::Failure { message, location } => {
-                ParseResult::Failure { message, location }
+            ParseResult::Success { value, location } =>
+                ParseResult::successful(f(value), location),
+            ParseResult::Failure { parse_error, location } => {
+                ParseResult::Failure { parse_error, location }
             }
         }
     }
